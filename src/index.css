@@ -55,9 +55,13 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    font-family: "DM Sans", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  .font-display {
+    font-family: "Syne", sans-serif;
   }
 
   ::-webkit-scrollbar {
@@ -116,9 +120,42 @@
 
 /* Landing page background mesh */
 .bg-mesh {
-  background-color: hsl(222, 28%, 9%);
+  background-color: hsl(222, 28%, 8%);
   background-image:
-    radial-gradient(at 20% 30%, hsl(263 65% 30% / 0.35) 0px, transparent 50%),
-    radial-gradient(at 80% 70%, hsl(208 80% 30% / 0.3) 0px, transparent 50%),
-    radial-gradient(at 50% 0%, hsl(263 65% 20% / 0.2) 0px, transparent 50%);
+    radial-gradient(at 15% 25%, hsl(263 65% 28% / 0.4) 0px, transparent 55%),
+    radial-gradient(at 85% 75%, hsl(35 90% 45% / 0.12) 0px, transparent 50%),
+    radial-gradient(at 50% 5%, hsl(208 80% 28% / 0.25) 0px, transparent 50%);
+}
+
+/* Ticker marquee */
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.ticker-track {
+  animation: ticker 30s linear infinite;
+  display: flex;
+  width: max-content;
+}
+
+.ticker-track:hover {
+  animation-play-state: paused;
+}
+
+/* Market grid pattern */
+.market-grid {
+  background-image:
+    linear-gradient(hsl(263 65% 60% / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(263 65% 60% / 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Number counter glow */
+.stat-glow {
+  text-shadow: 0 0 40px hsl(263 65% 60% / 0.5);
+}
+
+.amber-glow {
+  text-shadow: 0 0 40px hsl(35 90% 55% / 0.6);
 }
