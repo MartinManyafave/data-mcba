@@ -100,7 +100,7 @@ export default function Reports() {
       const monthly = Object.values(monthMap);
       const incTotal = txs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
       const expTotal = txs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-      const best = monthly.reduce((a, b) => (b.net > a.net ? b : a), monthly[0] ?? { net: 0 });
+      const best = monthly.length > 0 ? monthly.reduce((a, b) => (b.net > a.net ? b : a)) : null;
 
       setMonthlyData(monthly);
       setIncomeByCategory(Object.entries(incCat).map(([k, v]) => ({ name: getCategoryLabel(k), value: v })).sort((a, b) => b.value - a.value).slice(0, 7));

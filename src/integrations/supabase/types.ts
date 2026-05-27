@@ -6,7 +6,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[];
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       profiles: {
@@ -27,11 +27,13 @@ export interface Database {
           updated_at?: string;
         };
         Update: {
+          id?: string;
           full_name?: string | null;
           email?: string | null;
           avatar_url?: string | null;
           updated_at?: string;
         };
+        Relationships: [];
       };
       file_uploads: {
         Row: {
@@ -55,12 +57,14 @@ export interface Database {
           created_at?: string;
         };
         Update: {
+          id?: string;
           file_name?: string;
           file_type?: string;
           file_size?: number | null;
           status?: string;
           transaction_count?: number;
         };
+        Relationships: [];
       };
       transactions: {
         Row: {
@@ -90,6 +94,7 @@ export interface Database {
           created_at?: string;
         };
         Update: {
+          id?: string;
           date?: string;
           description?: string;
           amount?: number;
@@ -98,13 +103,15 @@ export interface Database {
           reference?: string | null;
           notes?: string | null;
         };
+        Relationships: [];
       };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
     Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
   };
-}
+};
 
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 export type FileUpload = Database["public"]["Tables"]["file_uploads"]["Row"];
