@@ -21,6 +21,7 @@ export default defineConfig({
           "chart-vendor": ["recharts"],
           "supabase-vendor": ["@supabase/supabase-js"],
           "motion-vendor": ["framer-motion"],
+          "xlsx-vendor": ["xlsx", "papaparse"],
         },
       },
     },
