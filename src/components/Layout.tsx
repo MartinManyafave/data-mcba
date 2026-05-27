@@ -81,44 +81,56 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {/* Nav */}
           <nav className="flex-1 p-2 space-y-0.5 mt-2">
             <TooltipProvider delayDuration={0}>
-              {navItems.map((item) => (
-                <Tooltip key={item.to} disableHoverableContent={!collapsed}>
-                  <TooltipTrigger asChild>
-                    <NavLink
-                      to={item.to}
-                      className={({ isActive }) =>
-                        cn(
-                          "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group",
-                          isActive
-                            ? "bg-primary/15 text-primary border border-primary/20"
-                            : "text-muted-foreground hover:text-foreground hover:bg-white/[0.05]",
-                          collapsed && "justify-center px-2"
-                        )
-                      }
-                    >
-                      {({ isActive }) => (
-                        <>
-                          <item.icon
-                            className={cn(
-                              "w-4 h-4 flex-shrink-0",
-                              isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
-                            )}
-                          />
-                          {!collapsed && (
-                            <>
-                              <span className="flex-1">{item.label}</span>
-                              {isActive && <ChevronRight className="w-3 h-3 opacity-50" />}
-                            </>
-                          )}
-                        </>
-                      )}
-                    </NavLink>
-                  </TooltipTrigger>
-                  {collapsed && (
+              {navItems.map((item) =>
+                collapsed ? (
+                  <Tooltip key={item.to}>
+                    <TooltipTrigger asChild>
+                      <NavLink
+                        to={item.to}
+                        className={({ isActive }) =>
+                          cn(
+                            "flex items-center justify-center px-2 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                            isActive
+                              ? "bg-primary/15 text-primary"
+                              : "text-muted-foreground hover:text-foreground hover:bg-white/[0.05]"
+                          )
+                        }
+                      >
+                        {({ isActive }) => (
+                          <item.icon className={cn("w-4 h-4", isActive ? "text-primary" : "text-muted-foreground")} />
+                        )}
+                      </NavLink>
+                    </TooltipTrigger>
                     <TooltipContent side="right">{item.label}</TooltipContent>
-                  )}
-                </Tooltip>
-              ))}
+                  </Tooltip>
+                ) : (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group",
+                        isActive
+                          ? "bg-primary/15 text-primary border border-primary/20"
+                          : "text-muted-foreground hover:text-foreground hover:bg-white/[0.05]"
+                      )
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <item.icon
+                          className={cn(
+                            "w-4 h-4 flex-shrink-0",
+                            isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                          )}
+                        />
+                        <span className="flex-1">{item.label}</span>
+                        {isActive && <ChevronRight className="w-3 h-3 opacity-50" />}
+                      </>
+                    )}
+                  </NavLink>
+                )
+              )}
             </TooltipProvider>
           </nav>
 
