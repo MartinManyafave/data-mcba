@@ -37,21 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, fetchProfile]);
 
   useEffect(() => {
-    // Cold-start detection: force sign-out on fresh browser session
-    const activeSession = sessionStorage.getItem("data_mcba_active_session");
-    if (!activeSession) {
-      supabase.auth.signOut();
-      setLoading(false);
-      return;
-    }
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id);
-      setLoading(false);
-    });
-
+    // Always set up the listener first so signIn() can update state
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session);
@@ -65,6 +51,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       }
     );
+
+    // Cold-start detection: if user opened a fresh browser tab (not a page reload),
+    // sign them out so they can't bypass auth by closing/reopening the browser.
+    const activeSession = sessionStorage.getItem("data_mcba_active_session");
+    if (!activeSession) {
+      supabase.auth.signOut();
+      setLoading(false);
+    } else {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) fetchProfile(session.user.id);
+        setLoading(false);
+      });
+    }
 
     return () => subscription.unsubscribe();
   }, [fetchProfile]);
