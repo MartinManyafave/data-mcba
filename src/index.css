@@ -159,3 +159,8 @@
 .amber-glow {
   text-shadow: 0 0 40px hsl(35 90% 55% / 0.6);
 }
+
+/* iOS safe area padding for bottom nav */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
