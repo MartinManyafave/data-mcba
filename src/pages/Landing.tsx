@@ -79,6 +79,7 @@ const PLANS = [
     desc: "Para puestos individuales que quieren orden.",
     color: "border-white/10",
     highlight: false,
+    paymentUrl: "", // → link de Mercado Pago
     features: [
       "1 puesto / usuario",
       "Carga de extractos CSV y Excel",
@@ -95,6 +96,7 @@ const PLANS = [
     color: "border-primary/40",
     highlight: true,
     badge: "MÁS ELEGIDO",
+    paymentUrl: "", // → link de Mercado Pago
     features: [
       "Hasta 5 puestos / usuarios",
       "Todos los formatos bancarios AR",
@@ -111,6 +113,7 @@ const PLANS = [
     desc: "Para administradores del Mercado Central.",
     color: "border-white/10",
     highlight: false,
+    paymentUrl: "", // → link de Mercado Pago
     features: [
       "Puestos ilimitados",
       "Vista consolidada del mercado",
@@ -215,11 +218,11 @@ export default function Landing() {
             <Link to="/login">
               <Button variant="ghost" size="sm" className="text-sm hidden sm:flex">Ingresar</Button>
             </Link>
-            <Link to="/login">
+            <a href="#precios">
               <Button size="sm" className="text-sm gap-1.5 font-display font-600">
-                Empezar gratis <ArrowRight className="w-3.5 h-3.5" />
+                Ver planes <ArrowRight className="w-3.5 h-3.5" />
               </Button>
-            </Link>
+            </a>
           </div>
         </div>
       </motion.nav>
@@ -268,16 +271,16 @@ export default function Landing() {
                 custom={3} variants={fadeUp} initial="hidden" animate="visible"
                 className="flex flex-col sm:flex-row gap-3"
               >
-                <Link to="/login">
-                  <Button size="lg" className="gap-2 w-full sm:w-auto font-display font-600 text-base px-6 h-12">
-                    Probar gratis 14 días <ArrowRight className="w-4 h-4" />
-                  </Button>
-                </Link>
                 <a href="#precios">
-                  <Button variant="outline" size="lg" className="w-full sm:w-auto font-display font-600 text-base h-12">
-                    Ver precios
+                  <Button size="lg" className="gap-2 w-full sm:w-auto font-display font-600 text-base px-6 h-12">
+                    Ver planes y precios <ArrowRight className="w-4 h-4" />
                   </Button>
                 </a>
+                <Link to="/login">
+                  <Button variant="outline" size="lg" className="w-full sm:w-auto font-display font-600 text-base h-12">
+                    Ingresar
+                  </Button>
+                </Link>
               </motion.div>
 
               <motion.div
@@ -627,14 +630,14 @@ export default function Landing() {
                   ))}
                 </ul>
 
-                <Link to="/login">
+                <a href={plan.paymentUrl ?? "#precios"}>
                   <Button
                     className="w-full font-display font-600"
                     variant={plan.highlight ? "default" : "outline"}
                   >
                     {plan.cta} <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
                   </Button>
-                </Link>
+                </a>
               </motion.div>
             ))}
           </div>
@@ -732,11 +735,11 @@ export default function Landing() {
               <p className="text-muted-foreground mb-7 max-w-lg mx-auto">
                 14 días gratis, sin tarjeta. Configurá tu puesto en menos de 5 minutos.
               </p>
-              <Link to="/login">
+              <a href="#precios">
                 <Button size="xl" className="gap-2 font-display font-600 text-base px-8">
-                  Crear cuenta gratis <ArrowRight className="w-4 h-4" />
+                  Ver planes y precios <ArrowRight className="w-4 h-4" />
                 </Button>
-              </Link>
+              </a>
             </div>
           </motion.div>
         </div>
@@ -759,7 +762,6 @@ export default function Landing() {
           </p>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
             <Link to="/login" className="hover:text-foreground transition-colors">Ingresar</Link>
-            <Link to="/login" className="hover:text-foreground transition-colors">Registrarse</Link>
             <a href="#precios" className="hover:text-foreground transition-colors">Precios</a>
           </div>
         </div>

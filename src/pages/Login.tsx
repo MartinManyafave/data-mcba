@@ -4,12 +4,11 @@ import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, TrendingUp, Loader2 } from "lucide-react";
+import { Eye, EyeOff, TrendingUp, Loader2, KeyRound } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 
 const loginSchema = z.object({
@@ -17,26 +16,19 @@ const loginSchema = z.object({
   password: z.string().min(6, "Mínimo 6 caracteres"),
 });
 
-const registerSchema = z.object({
-  fullName: z.string().min(2, "Ingresá tu nombre completo"),
-  email: z.string().email("Email inválido"),
-  password: z.string().min(6, "Mínimo 6 caracteres"),
-  confirmPassword: z.string(),
-}).refine((d) => d.password === d.confirmPassword, {
-  message: "Las contraseñas no coinciden",
-  path: ["confirmPassword"],
-});
-
 type LoginData = z.infer<typeof loginSchema>;
-type RegisterData = z.infer<typeof registerSchema>;
 
 export default function Login() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, resetPassword } = useAuth();
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
 
-  const loginForm = useForm<LoginData>({ resolver: zodResolver(loginSchema) });
-  const registerForm = useForm<RegisterData>({ resolver: zodResolver(registerSchema) });
+  const { register, handleSubmit, formState: { errors } } = useForm<LoginData>({
+    resolver: zodResolver(loginSchema),
+  });
 
   const handleLogin = async (data: LoginData) => {
     setLoading(true);
@@ -47,16 +39,16 @@ export default function Login() {
     }
   };
 
-  const handleRegister = async (data: RegisterData) => {
-    setLoading(true);
-    const { error } = await signUp(data.email, data.password, data.fullName);
-    setLoading(false);
+  const handleForgot = async () => {
+    if (!forgotEmail) return;
+    setForgotLoading(true);
+    const { error } = await resetPassword(forgotEmail);
+    setForgotLoading(false);
     if (error) {
-      toast.error(error.message.includes("already registered")
-        ? "Este email ya está registrado."
-        : "Error al crear la cuenta. Intentá de nuevo.");
+      toast.error("No se pudo enviar el email. Verificá la dirección.");
     } else {
-      toast.success("¡Cuenta creada! Revisá tu email para confirmar.");
+      toast.success("Email de recuperación enviado. Revisá tu bandeja.");
+      setForgotMode(false);
     }
   };
 
@@ -66,7 +58,7 @@ export default function Login() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-md"
+        className="w-full max-w-sm"
       >
         {/* Logo */}
         <div className="text-center mb-8">
@@ -74,42 +66,44 @@ export default function Login() {
             <div className="w-12 h-12 rounded-2xl bg-primary/20 border border-primary/30 flex items-center justify-center">
               <TrendingUp className="w-6 h-6 text-primary" />
             </div>
-            <span className="font-bold text-xl text-gradient">Data MCBA</span>
+            <span className="font-display font-700 text-xl text-gradient">Data MCBA</span>
           </Link>
-          <p className="text-sm text-muted-foreground mt-1">Sistema de análisis de datos</p>
+          <p className="text-sm text-muted-foreground mt-1">Mercado Central · Buenos Aires</p>
         </div>
 
         {/* Card */}
-        <div className="rounded-2xl border border-white/[0.09] bg-card/80 backdrop-blur-xl shadow-2xl p-8">
-          <Tabs defaultValue="login">
-            <TabsList className="w-full mb-6">
-              <TabsTrigger value="login" className="flex-1">Iniciar sesión</TabsTrigger>
-              <TabsTrigger value="register" className="flex-1">Crear cuenta</TabsTrigger>
-            </TabsList>
+        <div className="rounded-2xl border border-white/[0.09] bg-card/80 backdrop-blur-xl shadow-2xl p-7">
+          {!forgotMode ? (
+            <>
+              <div className="flex items-center gap-2 mb-6">
+                <KeyRound className="w-4 h-4 text-primary" />
+                <h2 className="font-display font-600 text-base">Acceder al sistema</h2>
+              </div>
 
-            {/* Login */}
-            <TabsContent value="login">
-              <form onSubmit={loginForm.handleSubmit(handleLogin)} className="space-y-4">
+              <form onSubmit={handleSubmit(handleLogin)} className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="login-email">Email</Label>
+                  <Label htmlFor="email">Email</Label>
                   <Input
-                    id="login-email"
+                    id="email"
                     type="email"
-                    placeholder="vos@ejemplo.com"
-                    {...loginForm.register("email")}
+                    placeholder="tu@email.com"
+                    autoComplete="email"
+                    {...register("email")}
                   />
-                  {loginForm.formState.errors.email && (
-                    <p className="text-xs text-destructive">{loginForm.formState.errors.email.message}</p>
+                  {errors.email && (
+                    <p className="text-xs text-destructive">{errors.email.message}</p>
                   )}
                 </div>
+
                 <div className="space-y-1.5">
-                  <Label htmlFor="login-password">Contraseña</Label>
+                  <Label htmlFor="password">Contraseña</Label>
                   <div className="relative">
                     <Input
-                      id="login-password"
+                      id="password"
                       type={showPass ? "text" : "password"}
                       placeholder="••••••••"
-                      {...loginForm.register("password")}
+                      autoComplete="current-password"
+                      {...register("password")}
                     />
                     <button
                       type="button"
@@ -119,76 +113,64 @@ export default function Login() {
                       {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  {loginForm.formState.errors.password && (
-                    <p className="text-xs text-destructive">{loginForm.formState.errors.password.message}</p>
+                  {errors.password && (
+                    <p className="text-xs text-destructive">{errors.password.message}</p>
                   )}
                 </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Iniciar sesión"}
-                </Button>
-              </form>
-            </TabsContent>
 
-            {/* Register */}
-            <TabsContent value="register">
-              <form onSubmit={registerForm.handleSubmit(handleRegister)} className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="reg-name">Nombre completo</Label>
-                  <Input
-                    id="reg-name"
-                    placeholder="Juan Pérez"
-                    {...registerForm.register("fullName")}
-                  />
-                  {registerForm.formState.errors.fullName && (
-                    <p className="text-xs text-destructive">{registerForm.formState.errors.fullName.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="reg-email">Email</Label>
-                  <Input
-                    id="reg-email"
-                    type="email"
-                    placeholder="vos@ejemplo.com"
-                    {...registerForm.register("email")}
-                  />
-                  {registerForm.formState.errors.email && (
-                    <p className="text-xs text-destructive">{registerForm.formState.errors.email.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="reg-pass">Contraseña</Label>
-                  <Input
-                    id="reg-pass"
-                    type="password"
-                    placeholder="Mínimo 6 caracteres"
-                    {...registerForm.register("password")}
-                  />
-                  {registerForm.formState.errors.password && (
-                    <p className="text-xs text-destructive">{registerForm.formState.errors.password.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="reg-confirm">Confirmar contraseña</Label>
-                  <Input
-                    id="reg-confirm"
-                    type="password"
-                    placeholder="••••••••"
-                    {...registerForm.register("confirmPassword")}
-                  />
-                  {registerForm.formState.errors.confirmPassword && (
-                    <p className="text-xs text-destructive">{registerForm.formState.errors.confirmPassword.message}</p>
-                  )}
-                </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Crear cuenta"}
+                <Button type="submit" className="w-full font-display font-600" disabled={loading}>
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Ingresar"}
                 </Button>
               </form>
-            </TabsContent>
-          </Tabs>
+
+              <button
+                onClick={() => setForgotMode(true)}
+                className="mt-4 w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                ¿Olvidaste tu contraseña?
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="mb-5">
+                <h2 className="font-display font-600 text-base mb-1">Recuperar contraseña</h2>
+                <p className="text-xs text-muted-foreground">Ingresá tu email y te enviamos el link.</p>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>Email</Label>
+                  <Input
+                    type="email"
+                    placeholder="tu@email.com"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                  />
+                </div>
+                <Button onClick={handleForgot} className="w-full" disabled={forgotLoading}>
+                  {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Enviar link"}
+                </Button>
+                <button
+                  onClick={() => setForgotMode(false)}
+                  className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  ← Volver al login
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
-        <p className="text-center text-xs text-muted-foreground mt-4">
-          <Link to="/" className="hover:text-foreground transition-colors">← Volver al inicio</Link>
+        <p className="text-center text-xs text-muted-foreground mt-5">
+          ¿No tenés cuenta?{" "}
+          <Link to="/#precios" className="text-primary hover:underline">
+            Adquirí un plan
+          </Link>
+        </p>
+
+        <p className="text-center mt-3">
+          <Link to="/" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            ← Volver al inicio
+          </Link>
         </p>
       </motion.div>
     </div>
