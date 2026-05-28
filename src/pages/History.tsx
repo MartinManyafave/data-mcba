@@ -48,6 +48,9 @@ export default function History() {
   const [amountVal, setAmountVal] = useState("");
   const [amountVal2, setAmountVal2] = useState("");
 
+  const [summaryIncome, setSummaryIncome] = useState(0);
+  const [summaryExpense, setSummaryExpense] = useState(0);
+
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -73,47 +76,62 @@ export default function History() {
     setPage(0);
   };
 
-  const totalIncome = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const totalExpense = transactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const applyFilters = <T extends ReturnType<typeof supabase.from>>(q: T) => {
+    let out = q as ReturnType<typeof supabase.from>;
+    if (typeFilter !== "all") out = out.eq("type", typeFilter);
+    if (categoryFilter !== "all") out = out.eq("category", categoryFilter);
+    if (dateFrom) out = out.gte("date", dateFrom);
+    if (dateTo) out = out.lte("date", dateTo);
+    if (search) out = out.ilike("description", `%${search}%`);
+    if (amountOp && amountVal) {
+      const val = parseFloat(amountVal);
+      if (!isNaN(val)) {
+        if (amountOp === "gt")  out = out.gt("amount", val);
+        if (amountOp === "lt")  out = out.lt("amount", val);
+        if (amountOp === "gte") out = out.gte("amount", val);
+        if (amountOp === "lte") out = out.lte("amount", val);
+        if (amountOp === "between" && amountVal2) {
+          const val2 = parseFloat(amountVal2);
+          if (!isNaN(val2)) out = out.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
+        }
+      }
+    }
+    return out as T;
+  };
 
   const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
-      let query = supabase
-        .from("transactions")
-        .select("*", { count: "exact" })
-        .eq("user_id", user.id)
-        .order("date", { ascending: false })
-        .order("created_at", { ascending: false })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      const pageQuery = applyFilters(
+        supabase
+          .from("transactions")
+          .select("*", { count: "exact" })
+          .eq("user_id", user.id)
+          .order("date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+      );
 
-      if (typeFilter !== "all") query = query.eq("type", typeFilter);
-      if (categoryFilter !== "all") query = query.eq("category", categoryFilter);
-      if (dateFrom) query = query.gte("date", dateFrom);
-      if (dateTo) query = query.lte("date", dateTo);
-      if (search) query = query.ilike("description", `%${search}%`);
+      const totalsQuery = applyFilters(
+        supabase
+          .from("transactions")
+          .select("amount, type")
+          .eq("user_id", user.id)
+      );
 
-      if (amountOp && amountVal) {
-        const val = parseFloat(amountVal);
-        if (!isNaN(val)) {
-          if (amountOp === "gt")  query = query.gt("amount", val);
-          if (amountOp === "lt")  query = query.lt("amount", val);
-          if (amountOp === "gte") query = query.gte("amount", val);
-          if (amountOp === "lte") query = query.lte("amount", val);
-          if (amountOp === "between" && amountVal2) {
-            const val2 = parseFloat(amountVal2);
-            if (!isNaN(val2)) {
-              query = query.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
-            }
-          }
-        }
-      }
+      const [{ data, count, error }, { data: allData, error: totalsErr }] =
+        await Promise.all([pageQuery, totalsQuery]);
 
-      const { data, count, error } = await query;
       if (error) throw error;
+      if (totalsErr) throw totalsErr;
+
       setTransactions(data ?? []);
       setTotal(count ?? 0);
+
+      const all = allData ?? [];
+      setSummaryIncome(all.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0));
+      setSummaryExpense(all.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0));
     } catch {
       toast.error("Error al cargar el historial");
     } finally {
@@ -341,9 +359,9 @@ export default function History() {
       {/* ── Summary stats ── */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "Total ingresos", value: formatCurrency(totalIncome), color: "text-success" },
-          { label: "Total egresos", value: formatCurrency(totalExpense), color: "text-destructive" },
-          { label: `${total} transacciones`, value: formatCurrency(totalIncome - totalExpense), color: "text-primary" },
+          { label: "Total ingresos", value: formatCurrency(summaryIncome), color: "text-success" },
+          { label: "Total egresos", value: formatCurrency(summaryExpense), color: "text-destructive" },
+          { label: `${total} transacciones`, value: formatCurrency(summaryIncome - summaryExpense), color: "text-primary" },
         ].map((s) => (
           <div key={s.label} className="rounded-xl border border-white/[0.07] bg-card/50 p-3">
             <p className="text-xs text-muted-foreground">{s.label}</p>
