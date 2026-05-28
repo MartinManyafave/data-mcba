@@ -54,6 +54,9 @@ export default function History() {
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   const amountFilterActive = !!(amountOp && amountVal);
 
   const activeFilterCount = [
@@ -158,6 +161,44 @@ export default function History() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (!user) return;
+    setBulkDeleting(true);
+    try {
+      if (activeFilterCount === 0 && !search) {
+        // No filters → delete everything for this user
+        const { error } = await supabase
+          .from("transactions")
+          .delete()
+          .eq("user_id", user.id);
+        if (error) throw error;
+      } else {
+        // Filters active → fetch matching IDs, delete in chunks
+        const { data: ids, error: fetchErr } = await applyFilters(
+          supabase.from("transactions").select("id").eq("user_id", user.id)
+        );
+        if (fetchErr) throw fetchErr;
+        const CHUNK = 100;
+        const allIds = (ids ?? []).map((r) => r.id);
+        for (let i = 0; i < allIds.length; i += CHUNK) {
+          const { error } = await supabase
+            .from("transactions")
+            .delete()
+            .in("id", allIds.slice(i, i + CHUNK));
+          if (error) throw error;
+        }
+      }
+      toast.success(`${total} transacciones eliminadas`);
+      clearFilters();
+      setBulkDeleteOpen(false);
+      load();
+    } catch (err: unknown) {
+      toast.error(`Error al eliminar: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   const amountOpLabel = AMOUNT_OPS.find((o) => o.value === amountOp)?.label ?? "";
@@ -196,6 +237,17 @@ export default function History() {
         <Button variant="ghost" size="icon" onClick={load} className="flex-shrink-0">
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
+        {total > 0 && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setBulkDeleteOpen(true)}
+            className="flex-shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            title={activeFilterCount > 0 || search ? `Borrar ${total} filtradas` : "Borrar todo el historial"}
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        )}
       </div>
 
       {/* ── Expanded filters panel ── */}
@@ -461,7 +513,7 @@ export default function History() {
         </div>
       )}
 
-      {/* ── Delete dialog ── */}
+      {/* ── Delete single dialog ── */}
       <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent>
           <DialogHeader>
@@ -483,6 +535,32 @@ export default function History() {
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
               {deleting ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : null}
               Eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Bulk delete dialog ── */}
+      <Dialog open={bulkDeleteOpen} onOpenChange={(o) => !o && setBulkDeleteOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">
+              {activeFilterCount > 0 || search ? "Borrar transacciones filtradas" : "Borrar todo el historial"}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {activeFilterCount > 0 || search
+              ? <>Esto eliminará <span className="text-foreground font-semibold">{total} transacciones</span> que coinciden con los filtros activos. Esta acción no se puede deshacer.</>
+              : <>Esto eliminará <span className="text-foreground font-semibold">todas las {total} transacciones</span> de tu cuenta. Esta acción no se puede deshacer.</>
+            }
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDeleteOpen(false)} disabled={bulkDeleting}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting
+                ? <><Loader2 className="w-4 h-4 animate-spin mr-1.5" />Eliminando...</>
+                : <><Trash2 className="w-4 h-4 mr-1.5" />Confirmar eliminación</>
+              }
             </Button>
           </DialogFooter>
         </DialogContent>
