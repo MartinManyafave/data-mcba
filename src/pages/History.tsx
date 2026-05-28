@@ -57,7 +57,8 @@ export default function History() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  const amountFilterActive = !!(amountOp && amountVal);
+  const amountFilterVal = amountOp && amountVal ? parseFloat(amountVal) : NaN;
+  const amountFilterActive = amountOp !== "" && !isNaN(amountFilterVal) && amountFilterVal > 0;
 
   const activeFilterCount = [
     typeFilter !== "all",
@@ -79,34 +80,34 @@ export default function History() {
     setPage(0);
   };
 
-  const applyFilters = <T extends ReturnType<typeof supabase.from>>(q: T) => {
-    let out = q as ReturnType<typeof supabase.from>;
-    if (typeFilter !== "all") out = out.eq("type", typeFilter);
-    if (categoryFilter !== "all") out = out.eq("category", categoryFilter);
-    if (dateFrom) out = out.gte("date", dateFrom);
-    if (dateTo) out = out.lte("date", dateTo);
-    if (search) out = out.ilike("description", `%${search}%`);
-    if (amountOp && amountVal) {
-      const val = parseFloat(amountVal);
-      if (!isNaN(val)) {
-        if (amountOp === "gt")  out = out.gt("amount", val);
-        if (amountOp === "lt")  out = out.lt("amount", val);
-        if (amountOp === "gte") out = out.gte("amount", val);
-        if (amountOp === "lte") out = out.lte("amount", val);
-        if (amountOp === "between" && amountVal2) {
-          const val2 = parseFloat(amountVal2);
-          if (!isNaN(val2)) out = out.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
-        }
-      }
-    }
-    return out as T;
-  };
-
   const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
-      const pageQuery = applyFilters(
+      // Build base filter — applied to both the paginated query and the totals query
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const addFilters = (q: any): any => {
+        if (typeFilter !== "all") q = q.eq("type", typeFilter);
+        if (categoryFilter !== "all") q = q.eq("category", categoryFilter);
+        if (dateFrom) q = q.gte("date", dateFrom);
+        if (dateTo) q = q.lte("date", dateTo);
+        if (search) q = q.ilike("description", `%${search}%`);
+        if (amountFilterActive) {
+          const val = amountFilterVal;
+          if (amountOp === "gt")  q = q.gt("amount", val);
+          if (amountOp === "lt")  q = q.lt("amount", val);
+          if (amountOp === "gte") q = q.gte("amount", val);
+          if (amountOp === "lte") q = q.lte("amount", val);
+          if (amountOp === "between" && amountVal2) {
+            const val2 = parseFloat(amountVal2);
+            if (!isNaN(val2) && val2 > 0)
+              q = q.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
+          }
+        }
+        return q;
+      };
+
+      const pageQuery = addFilters(
         supabase
           .from("transactions")
           .select("*", { count: "exact" })
@@ -116,7 +117,7 @@ export default function History() {
           .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
       );
 
-      const totalsQuery = applyFilters(
+      const totalsQuery = addFilters(
         supabase
           .from("transactions")
           .select("amount, type")
@@ -140,7 +141,7 @@ export default function History() {
     } finally {
       setLoading(false);
     }
-  }, [user, page, typeFilter, categoryFilter, dateFrom, dateTo, amountOp, amountVal, amountVal2, search]);
+  }, [user, page, typeFilter, categoryFilter, dateFrom, dateTo, amountOp, amountVal, amountVal2, amountFilterActive, amountFilterVal, search]);
 
   useEffect(() => {
     const t = setTimeout(load, search ? 400 : 0);
@@ -174,9 +175,25 @@ export default function History() {
         if (error) throw error;
       } else {
         // Filters active → fetch matching IDs, delete in chunks
-        const { data: ids, error: fetchErr } = await applyFilters(
-          supabase.from("transactions").select("id").eq("user_id", user.id)
-        );
+        let idsQuery = supabase.from("transactions").select("id").eq("user_id", user.id);
+        if (typeFilter !== "all") idsQuery = idsQuery.eq("type", typeFilter);
+        if (categoryFilter !== "all") idsQuery = idsQuery.eq("category", categoryFilter);
+        if (dateFrom) idsQuery = idsQuery.gte("date", dateFrom);
+        if (dateTo) idsQuery = idsQuery.lte("date", dateTo);
+        if (search) idsQuery = idsQuery.ilike("description", `%${search}%`);
+        if (amountFilterActive) {
+          const val = amountFilterVal;
+          if (amountOp === "gt")  idsQuery = idsQuery.gt("amount", val);
+          if (amountOp === "lt")  idsQuery = idsQuery.lt("amount", val);
+          if (amountOp === "gte") idsQuery = idsQuery.gte("amount", val);
+          if (amountOp === "lte") idsQuery = idsQuery.lte("amount", val);
+          if (amountOp === "between" && amountVal2) {
+            const val2 = parseFloat(amountVal2);
+            if (!isNaN(val2) && val2 > 0)
+              idsQuery = idsQuery.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
+          }
+        }
+        const { data: ids, error: fetchErr } = await idsQuery;
         if (fetchErr) throw fetchErr;
         const CHUNK = 100;
         const allIds = (ids ?? []).map((r) => r.id);
