@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { format } from "date-fns";
+import { format, subDays, startOfMonth, startOfWeek } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   TrendingUp, TrendingDown, Wallet, Upload, ArrowUpRight,
@@ -15,7 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import type { Transaction } from "@/integrations/supabase/types";
 import { toast } from "sonner";
 
@@ -23,7 +23,28 @@ interface DailyStat {
   date: string;
   income: number;
   expense: number;
-  net: number;
+}
+
+type Period = "today" | "yesterday" | "week" | "month" | "all";
+
+const PERIODS: { value: Period; label: string }[] = [
+  { value: "today",     label: "Hoy" },
+  { value: "yesterday", label: "Ayer" },
+  { value: "week",      label: "7 días" },
+  { value: "month",     label: "Este mes" },
+  { value: "all",       label: "Todo" },
+];
+
+function getPeriodRange(period: Period): { from: string; to: string } {
+  const today = format(new Date(), "yyyy-MM-dd");
+  if (period === "today")     return { from: today, to: today };
+  if (period === "yesterday") {
+    const y = format(subDays(new Date(), 1), "yyyy-MM-dd");
+    return { from: y, to: y };
+  }
+  if (period === "week")  return { from: format(subDays(new Date(), 6), "yyyy-MM-dd"), to: today };
+  if (period === "month") return { from: format(startOfMonth(new Date()), "yyyy-MM-dd"), to: today };
+  return { from: "2000-01-01", to: today };
 }
 
 export default function Dashboard() {
@@ -31,39 +52,42 @@ export default function Dashboard() {
   const location = useLocation();
   const todayLabel = format(new Date(), "EEEE d 'de' MMMM", { locale: es });
 
+  const [period, setPeriod] = useState<Period>("today");
   const [loading, setLoading] = useState(true);
   const [recentTxs, setRecentTxs] = useState<Transaction[]>([]);
-  const [weekStats, setWeekStats] = useState<DailyStat[]>([]);
+  const [chartData, setChartData] = useState<DailyStat[]>([]);
   const [totalIncome, setTotalIncome] = useState(0);
   const [totalExpense, setTotalExpense] = useState(0);
   const [uploadsCount, setUploadsCount] = useState(0);
 
-  const loadData = async () => {
+  const loadData = async (p: Period = period) => {
     if (!user) return;
     setLoading(true);
+    const { from, to } = getPeriodRange(p);
     try {
-      // Last 5 transactions (any date)
+      // Transactions for selected period
       const { data: txs } = await supabase
         .from("transactions")
         .select("*")
         .eq("user_id", user.id)
+        .gte("date", from)
+        .lte("date", to)
         .order("date", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(5);
 
-      // All-time totals
-      const { data: allTxs } = await supabase
+      // Totals for selected period
+      const { data: allPeriodTxs } = await supabase
         .from("transactions")
-        .select("amount, type")
-        .eq("user_id", user.id);
+        .select("amount, type, date")
+        .eq("user_id", user.id)
+        .gte("date", from)
+        .lte("date", to);
 
-      // Last 30 days for chart
-      const thirtyDaysAgo = format(
-        new Date(Date.now() - 29 * 24 * 60 * 60 * 1000),
-        "yyyy-MM-dd"
-      );
+      // Chart: always last 30 days
+      const thirtyDaysAgo = format(subDays(new Date(), 29), "yyyy-MM-dd");
       const today = format(new Date(), "yyyy-MM-dd");
-      const { data: weekTxs } = await supabase
+      const { data: chartTxs } = await supabase
         .from("transactions")
         .select("date, amount, type")
         .eq("user_id", user.id)
@@ -76,36 +100,26 @@ export default function Dashboard() {
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id);
 
-      // Build 30-day chart data (group by week for readability)
+      // Build 30-day chart
       const statsMap: Record<string, DailyStat> = {};
       for (let i = 29; i >= 0; i--) {
-        const d = format(new Date(Date.now() - i * 24 * 60 * 60 * 1000), "yyyy-MM-dd");
-        statsMap[d] = {
-          date: format(new Date(Date.now() - i * 24 * 60 * 60 * 1000), "dd/MM"),
-          income: 0,
-          expense: 0,
-          net: 0,
-        };
+        const d = format(subDays(new Date(), i), "yyyy-MM-dd");
+        statsMap[d] = { date: format(subDays(new Date(), i), "dd/MM"), income: 0, expense: 0 };
       }
-
-      (weekTxs ?? []).forEach((tx) => {
+      (chartTxs ?? []).forEach((tx) => {
         if (statsMap[tx.date]) {
           if (tx.type === "income") statsMap[tx.date].income += tx.amount;
           else statsMap[tx.date].expense += tx.amount;
-          statsMap[tx.date].net = statsMap[tx.date].income - statsMap[tx.date].expense;
         }
       });
-
-      // Sample every ~4 days so the chart doesn't get too crowded
       const allDays = Object.values(statsMap);
       const sampled = allDays.filter((_, i) => i % 4 === 0 || i === allDays.length - 1);
 
-      // All-time totals
-      const inc = (allTxs ?? []).filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-      const exp = (allTxs ?? []).filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+      const inc = (allPeriodTxs ?? []).filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+      const exp = (allPeriodTxs ?? []).filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
 
       setRecentTxs(txs ?? []);
-      setWeekStats(sampled);
+      setChartData(sampled);
       setTotalIncome(inc);
       setTotalExpense(exp);
       setUploadsCount(count ?? 0);
@@ -116,16 +130,13 @@ export default function Dashboard() {
     }
   };
 
-  // Re-fetch every time the user navigates to /dashboard
-  useEffect(() => {
-    loadData();
-  }, [user, location.key]);
+  useEffect(() => { loadData(period); }, [user, location.key, period]);
 
   const net = totalIncome - totalExpense;
 
   const stats = [
     {
-      label: "Total ingresos",
+      label: "Ingresos",
       value: formatCurrency(totalIncome),
       icon: TrendingUp,
       color: "text-success",
@@ -133,7 +144,7 @@ export default function Dashboard() {
       border: "border-success/20",
     },
     {
-      label: "Total egresos",
+      label: "Egresos",
       value: formatCurrency(totalExpense),
       icon: TrendingDown,
       color: "text-destructive",
@@ -158,6 +169,8 @@ export default function Dashboard() {
     },
   ];
 
+  const periodLabel = PERIODS.find((p) => p.value === period)?.label ?? "";
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
@@ -172,7 +185,7 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
+          <Button variant="outline" size="sm" onClick={() => loadData(period)} disabled={loading}>
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
           <Link to="/upload">
@@ -182,6 +195,24 @@ export default function Dashboard() {
             </Button>
           </Link>
         </div>
+      </div>
+
+      {/* Period selector */}
+      <div className="flex gap-1.5 flex-wrap">
+        {PERIODS.map((p) => (
+          <button
+            key={p.value}
+            onClick={() => setPeriod(p.value)}
+            className={cn(
+              "px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+              period === p.value
+                ? "bg-primary text-white shadow-sm"
+                : "bg-white/[0.04] text-muted-foreground hover:bg-white/[0.07] hover:text-foreground border border-white/[0.06]"
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
       </div>
 
       {/* Stats */}
@@ -221,7 +252,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={192}>
-                <AreaChart data={weekStats} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                <AreaChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <defs>
                     <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="hsl(152 60% 40%)" stopOpacity={0.3} />
@@ -258,7 +289,7 @@ export default function Dashboard() {
         {/* Recent transactions */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3 flex-row items-center justify-between">
-            <CardTitle className="text-base">Últimos movimientos</CardTitle>
+            <CardTitle className="text-base">Movimientos · {periodLabel}</CardTitle>
             {recentTxs.length > 0 && (
               <Link to="/history">
                 <Button variant="ghost" size="sm" className="text-xs h-7 px-2">Ver todos</Button>
@@ -275,7 +306,7 @@ export default function Dashboard() {
             ) : recentTxs.length === 0 ? (
               <div className="text-center py-8">
                 <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">Sin movimientos registrados</p>
+                <p className="text-sm text-muted-foreground">Sin movimientos en este período</p>
                 <Link to="/upload">
                   <Button variant="outline" size="sm" className="mt-3 gap-1.5">
                     <Upload className="w-3 h-3" />
