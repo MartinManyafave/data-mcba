@@ -286,6 +286,42 @@ export async function parseCSV(file: File): Promise<ParseResult> {
   });
 }
 
+// Read worksheet cells individually, preferring the formatted display string (w) over
+// the raw numeric value (v) when the display looks like an Argentine/accounting amount.
+// This is necessary for Santander XLS files where the internal v is scaled differently
+// from the displayed amount (e.g. v=-54733 displayed as "(547,33)" = -547.33 pesos).
+// For cells without such formatting (BBVA plain numbers, serial dates) we use v directly.
+function buildRows(ws: XLSX.WorkSheet): unknown[][] {
+  const ref = ws["!ref"];
+  if (!ref) return [];
+  const range = XLSX.utils.decode_range(ref);
+  const rows: unknown[][] = [];
+
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const row: unknown[] = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[addr] as XLSX.CellObject | undefined;
+      if (!cell || cell.v === undefined) { row.push(""); continue; }
+
+      if (cell.t === "n" && cell.w) {
+        const w = cell.w.trim();
+        // Use formatted string when it looks like an Argentine/accounting amount:
+        // parentheses, commas, $ sign, or dot-thousands pattern (e.g. "200.000,00")
+        if (/[(),]/.test(w) || /\d\.\d{3}/.test(w)) {
+          row.push(w);
+          continue;
+        }
+      }
+
+      row.push(cell.v);
+    }
+    rows.push(row);
+  }
+
+  return rows;
+}
+
 export async function parseExcel(file: File): Promise<ParseResult> {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -295,13 +331,7 @@ export async function parseExcel(file: File): Promise<ParseResult> {
         const workbook = XLSX.read(data, { type: "array" });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
 
-        // raw: true preserves actual cell values (numbers as numbers, not reformatted strings)
-        // This avoids XLSX misformatting amounts like -54733 → "(547,33)"
-        const rows: unknown[][] = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          raw: true,
-          defval: "",
-        });
+        const rows = buildRows(worksheet);
 
         if (rows.length < 2) {
           resolve({ transactions: [], warnings: ["Archivo vacío o sin datos"], totalRows: 0 });
