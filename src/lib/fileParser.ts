@@ -22,8 +22,15 @@ function parseAmount(value: unknown): number | null {
   if (typeof value === "string" && /^#+$/.test(value.trim())) return null; // Excel display overflow
   if (typeof value === "number") return isNaN(value) ? null : value;
 
-  const s = String(value).replace(/[$\s]/g, "").trim();
+  let s = String(value).replace(/[$\s]/g, "").trim();
   if (!s || s === "-") return null;
+
+  // Accounting parentheses notation: (1.234,56) = -1234.56
+  let negative = false;
+  if (s.startsWith("(") && s.endsWith(")")) {
+    negative = true;
+    s = s.slice(1, -1);
+  }
 
   const lastComma = s.lastIndexOf(",");
   const lastDot = s.lastIndexOf(".");
@@ -36,7 +43,8 @@ function parseAmount(value: unknown): number | null {
       : s.replace(/,/g, "");                      // US: 1,234,567.89
 
   const n = parseFloat(normalized);
-  return isNaN(n) ? null : n;
+  if (isNaN(n)) return null;
+  return negative ? -Math.abs(n) : n;
 }
 
 // ─── Date parsing ─────────────────────────────────────────────────────────────
