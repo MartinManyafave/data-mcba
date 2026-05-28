@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -15,7 +15,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { Transaction } from "@/integrations/supabase/types";
 import { toast } from "sonner";
@@ -29,11 +28,11 @@ interface DailyStat {
 
 export default function Dashboard() {
   const { user, profile } = useAuth();
-  const today = format(new Date(), "yyyy-MM-dd");
+  const location = useLocation();
   const todayLabel = format(new Date(), "EEEE d 'de' MMMM", { locale: es });
 
   const [loading, setLoading] = useState(true);
-  const [todayTxs, setTodayTxs] = useState<Transaction[]>([]);
+  const [recentTxs, setRecentTxs] = useState<Transaction[]>([]);
   const [weekStats, setWeekStats] = useState<DailyStat[]>([]);
   const [totalIncome, setTotalIncome] = useState(0);
   const [totalExpense, setTotalExpense] = useState(0);
@@ -43,24 +42,32 @@ export default function Dashboard() {
     if (!user) return;
     setLoading(true);
     try {
-      // Today's transactions
+      // Last 5 transactions (any date)
       const { data: txs } = await supabase
         .from("transactions")
         .select("*")
         .eq("user_id", user.id)
-        .eq("date", today)
-        .order("created_at", { ascending: false });
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(5);
 
-      // Last 7 days stats
-      const sevenDaysAgo = format(
-        new Date(Date.now() - 6 * 24 * 60 * 60 * 1000),
+      // All-time totals
+      const { data: allTxs } = await supabase
+        .from("transactions")
+        .select("amount, type")
+        .eq("user_id", user.id);
+
+      // Last 30 days for chart
+      const thirtyDaysAgo = format(
+        new Date(Date.now() - 29 * 24 * 60 * 60 * 1000),
         "yyyy-MM-dd"
       );
+      const today = format(new Date(), "yyyy-MM-dd");
       const { data: weekTxs } = await supabase
         .from("transactions")
         .select("date, amount, type")
         .eq("user_id", user.id)
-        .gte("date", sevenDaysAgo)
+        .gte("date", thirtyDaysAgo)
         .lte("date", today);
 
       // Uploads count
@@ -69,9 +76,9 @@ export default function Dashboard() {
         .select("*", { count: "exact", head: true })
         .eq("user_id", user.id);
 
-      // Build week chart data
+      // Build 30-day chart data (group by week for readability)
       const statsMap: Record<string, DailyStat> = {};
-      for (let i = 6; i >= 0; i--) {
+      for (let i = 29; i >= 0; i--) {
         const d = format(new Date(Date.now() - i * 24 * 60 * 60 * 1000), "yyyy-MM-dd");
         statsMap[d] = {
           date: format(new Date(Date.now() - i * 24 * 60 * 60 * 1000), "dd/MM"),
@@ -89,12 +96,16 @@ export default function Dashboard() {
         }
       });
 
-      const currentTxs = txs ?? [];
-      const inc = currentTxs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-      const exp = currentTxs.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+      // Sample every ~4 days so the chart doesn't get too crowded
+      const allDays = Object.values(statsMap);
+      const sampled = allDays.filter((_, i) => i % 4 === 0 || i === allDays.length - 1);
 
-      setTodayTxs(currentTxs.slice(0, 5));
-      setWeekStats(Object.values(statsMap));
+      // All-time totals
+      const inc = (allTxs ?? []).filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+      const exp = (allTxs ?? []).filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+
+      setRecentTxs(txs ?? []);
+      setWeekStats(sampled);
       setTotalIncome(inc);
       setTotalExpense(exp);
       setUploadsCount(count ?? 0);
@@ -105,15 +116,16 @@ export default function Dashboard() {
     }
   };
 
+  // Re-fetch every time the user navigates to /dashboard
   useEffect(() => {
     loadData();
-  }, [user]);
+  }, [user, location.key]);
 
   const net = totalIncome - totalExpense;
 
   const stats = [
     {
-      label: "Ingresos hoy",
+      label: "Total ingresos",
       value: formatCurrency(totalIncome),
       icon: TrendingUp,
       color: "text-success",
@@ -121,7 +133,7 @@ export default function Dashboard() {
       border: "border-success/20",
     },
     {
-      label: "Egresos hoy",
+      label: "Total egresos",
       value: formatCurrency(totalExpense),
       icon: TrendingDown,
       color: "text-destructive",
@@ -200,7 +212,7 @@ export default function Dashboard() {
         {/* Chart */}
         <Card className="lg:col-span-3">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Últimos 7 días</CardTitle>
+            <CardTitle className="text-base">Últimos 30 días</CardTitle>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -243,11 +255,11 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Today's transactions */}
+        {/* Recent transactions */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3 flex-row items-center justify-between">
-            <CardTitle className="text-base">Movimientos de hoy</CardTitle>
-            {todayTxs.length > 0 && (
+            <CardTitle className="text-base">Últimos movimientos</CardTitle>
+            {recentTxs.length > 0 && (
               <Link to="/history">
                 <Button variant="ghost" size="sm" className="text-xs h-7 px-2">Ver todos</Button>
               </Link>
@@ -260,10 +272,10 @@ export default function Dashboard() {
                   <div key={i} className="h-12 rounded-lg bg-white/[0.03] animate-pulse" />
                 ))}
               </div>
-            ) : todayTxs.length === 0 ? (
+            ) : recentTxs.length === 0 ? (
               <div className="text-center py-8">
                 <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">Sin movimientos hoy</p>
+                <p className="text-sm text-muted-foreground">Sin movimientos registrados</p>
                 <Link to="/upload">
                   <Button variant="outline" size="sm" className="mt-3 gap-1.5">
                     <Upload className="w-3 h-3" />
@@ -273,7 +285,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="space-y-1.5">
-                {todayTxs.map((tx) => (
+                {recentTxs.map((tx) => (
                   <div
                     key={tx.id}
                     className="flex items-center justify-between py-2 px-2.5 rounded-lg hover:bg-white/[0.03] transition-colors"
@@ -290,7 +302,10 @@ export default function Dashboard() {
                           ? <ArrowUpRight className="w-3.5 h-3.5" />
                           : <ArrowDownRight className="w-3.5 h-3.5" />}
                       </div>
-                      <p className="text-xs truncate">{tx.description}</p>
+                      <div className="min-w-0">
+                        <p className="text-xs truncate">{tx.description}</p>
+                        <p className="text-[10px] text-muted-foreground">{formatDate(tx.date)}</p>
+                      </div>
                     </div>
                     <span
                       className={`text-xs font-semibold flex-shrink-0 ml-2 ${
@@ -309,7 +324,7 @@ export default function Dashboard() {
       </div>
 
       {/* Quick actions */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {[
           { to: "/upload", icon: Upload, label: "Cargar archivo", desc: "CSV o Excel" },
           { to: "/history", icon: FileText, label: "Ver historial", desc: "Todas las transacciones" },
