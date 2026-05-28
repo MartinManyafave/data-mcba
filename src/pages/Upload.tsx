@@ -11,25 +11,15 @@ import { parseFile, type ParsedTransaction } from "@/lib/fileParser";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, getCategoryLabel } from "@/lib/utils";
 import { toast } from "sonner";
-
-const FILE_TYPES = [
-  { value: "bank_statement", label: "Extracto Bancario" },
-  { value: "transfer", label: "Transferencias" },
-  { value: "current_account", label: "Cuenta Corriente" },
-  { value: "comanda", label: "Comanda" },
-  { value: "other", label: "Otro" },
-];
 
 type UploadStep = "idle" | "parsing" | "preview" | "saving" | "done";
 
 interface FileEntry {
   id: string;
   file: File;
-  fileType: string;
   status: "parsing" | "ready" | "error";
   transactions: ParsedTransaction[];
   warnings: string[];
@@ -40,50 +30,44 @@ interface FileEntry {
 export default function Upload() {
   const { user } = useAuth();
   const [step, setStep] = useState<UploadStep>("idle");
-  const [globalFileType, setGlobalFileType] = useState("bank_statement");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [savedCount, setSavedCount] = useState(0);
 
-  const onDrop = useCallback(
-    async (accepted: File[]) => {
-      if (!accepted.length) return;
-      setStep("parsing");
+  const onDrop = useCallback(async (accepted: File[]) => {
+    if (!accepted.length) return;
+    setStep("parsing");
 
-      const newEntries: FileEntry[] = accepted.map((file) => ({
-        id: crypto.randomUUID(),
-        file,
-        fileType: globalFileType,
-        status: "parsing",
-        transactions: [],
-        warnings: [],
-        totalRows: 0,
-        expanded: false,
-      }));
+    const newEntries: FileEntry[] = accepted.map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      status: "parsing",
+      transactions: [],
+      warnings: [],
+      totalRows: 0,
+      expanded: false,
+    }));
 
-      setEntries((prev) => [...prev, ...newEntries]);
+    setEntries((prev) => [...prev, ...newEntries]);
 
-      // Parse all files in parallel
-      const results = await Promise.all(accepted.map((f) => parseFile(f)));
+    const results = await Promise.all(accepted.map((f) => parseFile(f)));
 
-      setEntries((prev) =>
-        prev.map((entry) => {
-          const idx = newEntries.findIndex((n) => n.id === entry.id);
-          if (idx === -1) return entry;
-          const r = results[idx];
-          return {
-            ...entry,
-            status: "ready",
-            transactions: r.transactions,
-            warnings: r.warnings,
-            totalRows: r.totalRows,
-          };
-        })
-      );
+    setEntries((prev) =>
+      prev.map((entry) => {
+        const idx = newEntries.findIndex((n) => n.id === entry.id);
+        if (idx === -1) return entry;
+        const r = results[idx];
+        return {
+          ...entry,
+          status: "ready",
+          transactions: r.transactions,
+          warnings: r.warnings,
+          totalRows: r.totalRows,
+        };
+      })
+    );
 
-      setStep("preview");
-    },
-    [globalFileType]
-  );
+    setStep("preview");
+  }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -106,9 +90,6 @@ export default function Upload() {
   const toggleExpand = (id: string) =>
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, expanded: !e.expanded } : e)));
 
-  const updateFileType = (id: string, fileType: string) =>
-    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, fileType } : e)));
-
   const handleSave = async () => {
     if (!user || entries.length === 0) return;
     const readyEntries = entries.filter((e) => e.status === "ready" && e.transactions.length > 0);
@@ -124,7 +105,7 @@ export default function Upload() {
           .insert({
             user_id: user.id,
             file_name: entry.file.name,
-            file_type: entry.fileType,
+            file_type: "bank_statement",
             file_size: entry.file.size,
             status: "processed",
             transaction_count: entry.transactions.length,
@@ -141,7 +122,7 @@ export default function Upload() {
           description: t.description,
           amount: t.amount,
           type: t.type,
-          category: entry.fileType,
+          category: t.category,
           reference: t.reference ?? null,
         }));
 
@@ -178,7 +159,7 @@ export default function Upload() {
       <div>
         <h1 className="text-2xl font-bold">Cargar Archivo</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Importá uno o varios extractos bancarios, transferencias o comandas.
+          Importá extractos bancarios — el sistema detecta automáticamente cada tipo de movimiento.
         </p>
       </div>
 
@@ -267,22 +248,6 @@ export default function Upload() {
                       )}
                     </div>
 
-                    {/* File type selector per file */}
-                    <Select
-                      value={entry.fileType}
-                      onValueChange={(v) => updateFileType(entry.id, v)}
-                      disabled={step === "saving"}
-                    >
-                      <SelectTrigger className="w-40 h-8 text-xs hidden sm:flex">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {FILE_TYPES.map((t) => (
-                          <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
                     {entry.status === "ready" && entry.transactions.length > 0 && (
                       <button
                         onClick={() => toggleExpand(entry.id)}
@@ -326,13 +291,13 @@ export default function Upload() {
                         exit={{ height: 0, opacity: 0 }}
                         className="overflow-hidden"
                       >
-                        <div className="border-t border-white/[0.06] overflow-auto max-h-56">
+                        <div className="border-t border-white/[0.06] overflow-auto max-h-64">
                           <Table>
                             <TableHeader>
                               <TableRow>
                                 <TableHead>Fecha</TableHead>
                                 <TableHead>Descripción</TableHead>
-                                <TableHead>Tipo</TableHead>
+                                <TableHead className="hidden sm:table-cell">Categoría</TableHead>
                                 <TableHead className="text-right">Monto</TableHead>
                               </TableRow>
                             </TableHeader>
@@ -340,15 +305,19 @@ export default function Upload() {
                               {entry.transactions.slice(0, 20).map((tx, i) => (
                                 <TableRow key={i}>
                                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(tx.date)}</TableCell>
-                                  <TableCell className="text-xs max-w-[200px] truncate">{tx.description}</TableCell>
-                                  <TableCell>
-                                    <Badge variant={tx.type === "income" ? "success" : "destructive"} className="text-[10px]">
-                                      {tx.type === "income" ? <ArrowUpRight className="w-3 h-3 mr-0.5" /> : <ArrowDownRight className="w-3 h-3 mr-0.5" />}
-                                      {tx.type === "income" ? "Ingreso" : "Egreso"}
+                                  <TableCell className="text-xs max-w-[150px] truncate">{tx.description}</TableCell>
+                                  <TableCell className="hidden sm:table-cell">
+                                    <Badge variant="outline" className="text-[10px] whitespace-nowrap">
+                                      {getCategoryLabel(tx.category)}
                                     </Badge>
                                   </TableCell>
                                   <TableCell className={`text-right text-sm font-medium ${tx.type === "income" ? "text-success" : "text-destructive"}`}>
-                                    {tx.type === "income" ? "+" : "-"}{formatCurrency(tx.amount)}
+                                    <span className="flex items-center justify-end gap-0.5">
+                                      {tx.type === "income"
+                                        ? <ArrowUpRight className="w-3 h-3" />
+                                        : <ArrowDownRight className="w-3 h-3" />}
+                                      {formatCurrency(tx.amount)}
+                                    </span>
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -387,26 +356,6 @@ export default function Upload() {
         {/* ── Idle / Parsing ── */}
         {(step === "idle" || step === "parsing") && (
           <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-            {/* Global file type */}
-            <Card className="p-4">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex-1">
-                  <p className="text-sm font-medium mb-0.5">Tipo de archivo</p>
-                  <p className="text-xs text-muted-foreground">Se aplica a todos los archivos de esta carga</p>
-                </div>
-                <Select value={globalFileType} onValueChange={setGlobalFileType}>
-                  <SelectTrigger className="w-full sm:w-52">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FILE_TYPES.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </Card>
-
             {/* Drop zone */}
             <div
               {...getRootProps()}
@@ -438,13 +387,15 @@ export default function Upload() {
 
             {/* Hints */}
             <Card className="p-4">
-              <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wide">Formatos soportados</p>
+              <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wide">Detección automática de categorías</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
-                  "Extractos con columnas Fecha, Descripción, Monto",
-                  "Extractos con columnas Debe / Haber separadas",
-                  "Importes con formato (1.234,56) para débitos",
-                  "Múltiples archivos en una sola carga",
+                  "Impuestos y percepciones (AFIP, IIBB, IVA)",
+                  "Transferencias recibidas y realizadas",
+                  "Pagos a proveedores y honorarios",
+                  "Inversiones, fondos y plazos fijos",
+                  "Sueldos, haberes y cargas sociales",
+                  "Cheques, débitos automáticos y DEBIN",
                 ].map((hint) => (
                   <div key={hint} className="flex items-start gap-2 text-xs text-muted-foreground">
                     <CheckCircle2 className="w-3.5 h-3.5 text-success mt-0.5 flex-shrink-0" />

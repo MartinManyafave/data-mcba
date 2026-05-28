@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
+import { CATEGORY_LABELS } from "./categoryDetector";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -38,19 +39,5 @@ export function getTransactionTypeLabel(type: string): string {
 }
 
 export function getCategoryLabel(category: string): string {
-  const labels: Record<string, string> = {
-    bank_statement: "Extracto Bancario",
-    transfer: "Transferencia",
-    current_account: "Cuenta Corriente",
-    comanda: "Comanda",
-    other: "Otro",
-    salary: "Salario",
-    services: "Servicios",
-    taxes: "Impuestos",
-    sales: "Ventas",
-    purchases: "Compras",
-    fees: "Comisiones",
-    interest: "Intereses",
-  };
-  return labels[category] ?? toTitleCase(category);
+  return CATEGORY_LABELS[category] ?? toTitleCase(category);
 }

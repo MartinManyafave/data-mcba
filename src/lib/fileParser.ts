@@ -1,11 +1,13 @@
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
+import { detectCategory } from "./categoryDetector";
 
 export interface ParsedTransaction {
   date: string;
   description: string;
   amount: number;
   type: "income" | "expense";
+  category: string;
   reference?: string;
 }
 
@@ -239,7 +241,8 @@ function processRows(rows: unknown[][], headerRowIndex: number): ParseResult {
       continue;
     }
 
-    transactions.push({ date, description, amount, type, reference });
+    const category = detectCategory(description, type);
+    transactions.push({ date, description, amount, type, category, reference });
   }
 
   return { transactions, warnings, totalRows: dataRowCount };

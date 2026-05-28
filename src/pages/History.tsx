@@ -14,18 +14,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { formatCurrency, formatDate, getCategoryLabel } from "@/lib/utils";
+import { SELECTABLE_CATEGORIES } from "@/lib/categoryDetector";
 import type { Transaction } from "@/integrations/supabase/types";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 20;
 
-const CATEGORIES = [
-  { value: "all", label: "Todas las categorías" },
-  { value: "bank_statement", label: "Extracto Bancario" },
-  { value: "transfer", label: "Transferencias" },
-  { value: "current_account", label: "Cuenta Corriente" },
-  { value: "comanda", label: "Comanda" },
-  { value: "other", label: "Otro" },
+type AmountOp = "gt" | "lt" | "gte" | "lte" | "between" | "";
+
+const AMOUNT_OPS: { value: AmountOp; label: string }[] = [
+  { value: "gt",      label: "Mayor que (>)" },
+  { value: "gte",     label: "Mayor o igual (≥)" },
+  { value: "lt",      label: "Menor que (<)" },
+  { value: "lte",     label: "Menor o igual (≤)" },
+  { value: "between", label: "Entre dos valores" },
 ];
 
 export default function History() {
@@ -42,19 +44,21 @@ export default function History() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [amountMin, setAmountMin] = useState("");
-  const [amountMax, setAmountMax] = useState("");
+  const [amountOp, setAmountOp] = useState<AmountOp>("");
+  const [amountVal, setAmountVal] = useState("");
+  const [amountVal2, setAmountVal2] = useState("");
 
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const amountFilterActive = !!(amountOp && amountVal);
 
   const activeFilterCount = [
     typeFilter !== "all",
     categoryFilter !== "all",
     !!dateFrom,
     !!dateTo,
-    !!amountMin,
-    !!amountMax,
+    amountFilterActive,
   ].filter(Boolean).length;
 
   const clearFilters = () => {
@@ -63,8 +67,9 @@ export default function History() {
     setCategoryFilter("all");
     setDateFrom("");
     setDateTo("");
-    setAmountMin("");
-    setAmountMax("");
+    setAmountOp("");
+    setAmountVal("");
+    setAmountVal2("");
     setPage(0);
   };
 
@@ -87,9 +92,23 @@ export default function History() {
       if (categoryFilter !== "all") query = query.eq("category", categoryFilter);
       if (dateFrom) query = query.gte("date", dateFrom);
       if (dateTo) query = query.lte("date", dateTo);
-      if (amountMin) query = query.gte("amount", parseFloat(amountMin));
-      if (amountMax) query = query.lte("amount", parseFloat(amountMax));
       if (search) query = query.ilike("description", `%${search}%`);
+
+      if (amountOp && amountVal) {
+        const val = parseFloat(amountVal);
+        if (!isNaN(val)) {
+          if (amountOp === "gt")  query = query.gt("amount", val);
+          if (amountOp === "lt")  query = query.lt("amount", val);
+          if (amountOp === "gte") query = query.gte("amount", val);
+          if (amountOp === "lte") query = query.lte("amount", val);
+          if (amountOp === "between" && amountVal2) {
+            const val2 = parseFloat(amountVal2);
+            if (!isNaN(val2)) {
+              query = query.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
+            }
+          }
+        }
+      }
 
       const { data, count, error } = await query;
       if (error) throw error;
@@ -100,7 +119,7 @@ export default function History() {
     } finally {
       setLoading(false);
     }
-  }, [user, page, typeFilter, categoryFilter, dateFrom, dateTo, amountMin, amountMax, search]);
+  }, [user, page, typeFilter, categoryFilter, dateFrom, dateTo, amountOp, amountVal, amountVal2, search]);
 
   useEffect(() => {
     const t = setTimeout(load, search ? 400 : 0);
@@ -122,6 +141,8 @@ export default function History() {
   };
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const amountOpLabel = AMOUNT_OPS.find((o) => o.value === amountOp)?.label ?? "";
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -190,7 +211,8 @@ export default function History() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CATEGORIES.map((c) => (
+                  <SelectItem value="all">Todas las categorías</SelectItem>
+                  {SELECTABLE_CATEGORIES.map((c) => (
                     <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -219,29 +241,56 @@ export default function History() {
               />
             </div>
 
-            {/* Amount min */}
+            {/* Amount operator */}
             <div className="space-y-1.5">
-              <p className="text-xs text-muted-foreground font-medium">Monto mínimo</p>
-              <Input
-                type="number"
-                placeholder="0"
-                className="h-9 text-sm"
-                value={amountMin}
-                onChange={(e) => { setAmountMin(e.target.value); setPage(0); }}
-              />
+              <p className="text-xs text-muted-foreground font-medium">Monto</p>
+              <Select value={amountOp || "none"} onValueChange={(v) => { setAmountOp(v === "none" ? "" : v as AmountOp); setAmountVal(""); setAmountVal2(""); setPage(0); }}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder="Sin filtro de monto" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sin filtro de monto</SelectItem>
+                  {AMOUNT_OPS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            {/* Amount max */}
-            <div className="space-y-1.5">
-              <p className="text-xs text-muted-foreground font-medium">Monto máximo</p>
-              <Input
-                type="number"
-                placeholder="Sin límite"
-                className="h-9 text-sm"
-                value={amountMax}
-                onChange={(e) => { setAmountMax(e.target.value); setPage(0); }}
-              />
-            </div>
+            {/* Amount value(s) */}
+            {amountOp && (
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground font-medium">
+                  {amountOp === "between" ? "Desde / Hasta" : "Valor"}
+                </p>
+                {amountOp === "between" ? (
+                  <div className="flex gap-1.5">
+                    <Input
+                      type="number"
+                      placeholder="Mín"
+                      className="h-9 text-sm"
+                      value={amountVal}
+                      onChange={(e) => { setAmountVal(e.target.value); setPage(0); }}
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Máx"
+                      className="h-9 text-sm"
+                      value={amountVal2}
+                      onChange={(e) => { setAmountVal2(e.target.value); setPage(0); }}
+                    />
+                  </div>
+                ) : (
+                  <Input
+                    type="number"
+                    placeholder="Ingresá un monto"
+                    className="h-9 text-sm"
+                    value={amountVal}
+                    onChange={(e) => { setAmountVal(e.target.value); setPage(0); }}
+                  />
+                )}
+              </div>
+            )}
           </div>
 
           {activeFilterCount > 0 && (
@@ -278,14 +327,9 @@ export default function History() {
               Hasta {dateTo} <X className="w-3 h-3" />
             </Badge>
           )}
-          {amountMin && (
-            <Badge variant="outline" className="text-xs gap-1 cursor-pointer" onClick={() => setAmountMin("")}>
-              Min {formatCurrency(parseFloat(amountMin))} <X className="w-3 h-3" />
-            </Badge>
-          )}
-          {amountMax && (
-            <Badge variant="outline" className="text-xs gap-1 cursor-pointer" onClick={() => setAmountMax("")}>
-              Max {formatCurrency(parseFloat(amountMax))} <X className="w-3 h-3" />
+          {amountFilterActive && (
+            <Badge variant="outline" className="text-xs gap-1 cursor-pointer" onClick={() => { setAmountOp(""); setAmountVal(""); setAmountVal2(""); }}>
+              Monto {amountOpLabel} {amountOp === "between" && amountVal2 ? `${formatCurrency(parseFloat(amountVal))} – ${formatCurrency(parseFloat(amountVal2))}` : formatCurrency(parseFloat(amountVal))} <X className="w-3 h-3" />
             </Badge>
           )}
           <button onClick={clearFilters} className="text-xs text-muted-foreground hover:text-foreground underline">
