@@ -36,13 +36,23 @@ function parseAmount(value: unknown): number | null {
 
   const lastComma = s.lastIndexOf(",");
   const lastDot = s.lastIndexOf(".");
+  const dotCount = (s.match(/\./g) ?? []).length;
 
-  // Argentine format: dots = thousands separator, comma = decimal point
-  // US/XLSX format: commas = thousands separator, dot = decimal point
-  const normalized =
-    lastComma > lastDot
-      ? s.replace(/\./g, "").replace(",", ".")   // Argentine: 1.234.567,89
-      : s.replace(/,/g, "");                      // US: 1,234,567.89
+  // Determine whether this is Argentine format (dot=thousands, comma=decimal)
+  // or US/XLSX format (comma=thousands, dot=decimal).
+  //
+  // Argentine if ANY of:
+  //   1. Comma appears AFTER the last dot  ("17.200,00", "1.307.000,00")
+  //   2. Multiple dots                     ("1.307.000"  — dots are thousands seps)
+  //   3. Single dot + exactly 3 trailing digits, no comma ("17.200" → 17200)
+  const isArgentine =
+    lastComma > lastDot ||
+    dotCount > 1 ||
+    (dotCount === 1 && lastComma === -1 && /\.\d{3}$/.test(s));
+
+  const normalized = isArgentine
+    ? s.replace(/\./g, "").replace(",", ".")   // remove thousand-dots, comma→decimal
+    : s.replace(/,/g, "");                      // remove thousand-commas, keep dot
 
   const n = parseFloat(normalized);
   if (isNaN(n)) return null;
