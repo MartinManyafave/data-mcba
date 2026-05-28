@@ -15,75 +15,227 @@ export interface ParseResult {
   totalRows: number;
 }
 
-function detectDateFormat(value: string): string | null {
-  // DD/MM/YYYY
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(value)) {
-    const [d, m, y] = value.split("/");
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
-  // YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  // DD-MM-YYYY
-  if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(value)) {
-    const [d, m, y] = value.split("-");
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
-  // Excel serial date
-  const serial = parseFloat(value);
-  if (!isNaN(serial) && serial > 40000 && serial < 60000) {
-    const date = XLSX.SSF.parse_date_code(serial);
-    if (date) {
-      const m = String(date.m).padStart(2, "0");
-      const d = String(date.d).padStart(2, "0");
-      return `${date.y}-${m}-${d}`;
-    }
-  }
-  return null;
-}
+// ─── Amount parsing ───────────────────────────────────────────────────────────
 
-function parseAmount(value: string): number | null {
-  if (!value) return null;
-  // Remove currency symbols, spaces
-  const cleaned = value.replace(/[$ \s]/g, "").replace(/\./g, "").replace(",", ".");
-  const n = parseFloat(cleaned);
+function parseAmount(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") return isNaN(value) ? null : value;
+
+  const s = String(value).replace(/[$\s]/g, "").trim();
+  if (!s || s === "-") return null;
+
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+
+  // Argentine format: dots = thousands separator, comma = decimal point
+  // US/XLSX format: commas = thousands separator, dot = decimal point
+  const normalized =
+    lastComma > lastDot
+      ? s.replace(/\./g, "").replace(",", ".")   // Argentine: 1.234.567,89
+      : s.replace(/,/g, "");                      // US: 1,234,567.89
+
+  const n = parseFloat(normalized);
   return isNaN(n) ? null : n;
 }
 
-function guessColumnMapping(headers: string[]): {
+// ─── Date parsing ─────────────────────────────────────────────────────────────
+
+function excelSerialToDate(serial: number): string | null {
+  const d = Math.floor(serial);
+  if (d < 40000 || d > 65000) return null;
+  // 25569 = days from Excel epoch (Dec 30, 1899) to Unix epoch (Jan 1, 1970)
+  const date = new Date((d - 25569) * 86400 * 1000);
+  if (isNaN(date.getTime())) return null;
+  const y = date.getUTCFullYear();
+  if (y < 1990 || y > 2100) return null;
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseDate(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+
+  // Numeric → Excel serial date
+  if (typeof value === "number") return excelSerialToDate(value);
+
+  const s = String(value).trim();
+  if (!s) return null;
+
+  // DD/MM/YYYY or DD-MM-YYYY (Argentine standard)
+  const ar = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (ar) {
+    const [, d, m, y] = ar;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+
+  // YYYY-MM-DD (ISO)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // Numeric string that might be Excel serial (e.g. "46206.99")
+  const num = parseFloat(s);
+  if (!isNaN(num) && num > 40000 && num < 65000) return excelSerialToDate(num);
+
+  return null;
+}
+
+// ─── Column mapping ───────────────────────────────────────────────────────────
+
+interface ColumnMapping {
   dateCol: number;
   descCol: number;
   amountCol: number;
   creditCol?: number;
   debitCol?: number;
-} {
-  const lower = headers.map((h) => h.toLowerCase().trim());
+  operationCol?: number;
+  referenceCol?: number;
+}
 
-  const dateCol = lower.findIndex((h) =>
-    ["fecha", "date", "fec", "dia", "día"].some((k) => h.includes(k))
+/** Ordered priority search: first keyword group that finds a column wins */
+function findCol(lower: string[], ...groups: string[][]): number {
+  for (const keywords of groups) {
+    const idx = lower.findIndex((h) => keywords.some((k) => h.includes(k)));
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+function guessColumns(headers: unknown[]): ColumnMapping {
+  const lower = headers.map((h) => String(h ?? "").toLowerCase().trim());
+
+  const dateCol = findCol(lower,
+    ["fecha de ejecución", "fecha de ejec"],
+    ["fecha"],
   );
-  const descCol = lower.findIndex((h) =>
-    ["concepto", "descripcion", "descripción", "detalle", "description", "motivo", "glosa"].some(
-      (k) => h.includes(k)
-    )
+
+  const descCol = findCol(lower,
+    ["concepto"],
+    ["descripcion", "descripción", "description"],
+    ["detalle"],
+    ["motivo", "glosa"],
+    ["operación", "operacion"],
   );
-  const amountCol = lower.findIndex((h) =>
-    ["importe", "monto", "amount", "valor", "total"].some((k) => h.includes(k))
+
+  // Prioritize "importe" and "monto" over generic "valor" to avoid
+  // matching "Fecha Valor" or "Valor de cuotaparte" in superfondos
+  const amountCol = findCol(lower,
+    ["importe pesos", "importe en pesos"],
+    ["importe"],
+    ["monto neto"],
+    ["monto"],
+    ["amount"],
+    ["total"],
   );
-  const creditCol = lower.findIndex((h) =>
-    ["credito", "crédito", "credit", "haber", "ingreso"].some((k) => h.includes(k))
-  );
-  const debitCol = lower.findIndex((h) =>
-    ["debito", "débito", "debit", "debe", "egreso", "cargo"].some((k) => h.includes(k))
+
+  const creditCol = findCol(lower, ["crédito", "credito", "credit", "haber", "ingreso"]);
+  const debitCol  = findCol(lower, ["débito",  "debito",  "debit",  "debe",  "egreso", "cargo"]);
+
+  const operationCol = findCol(lower, ["operación", "operacion"]);
+
+  const referenceCol = findCol(lower,
+    ["número documento", "numero documento"],
+    ["certificado"],
+    ["referencia"],
   );
 
   return {
-    dateCol: dateCol >= 0 ? dateCol : 0,
-    descCol: descCol >= 0 ? descCol : 1,
-    amountCol: amountCol >= 0 ? amountCol : 2,
-    creditCol: creditCol >= 0 ? creditCol : undefined,
-    debitCol: debitCol >= 0 ? debitCol : undefined,
+    dateCol:      dateCol      >= 0 ? dateCol      : 0,
+    descCol:      descCol      >= 0 ? descCol      : 1,
+    amountCol:    amountCol    >= 0 ? amountCol    : 2,
+    creditCol:    creditCol    >= 0 ? creditCol    : undefined,
+    debitCol:     debitCol     >= 0 ? debitCol     : undefined,
+    operationCol: operationCol >= 0 ? operationCol : undefined,
+    referenceCol: referenceCol >= 0 ? referenceCol : undefined,
   };
 }
+
+// ─── Header row detection ─────────────────────────────────────────────────────
+
+const DATE_KW   = ["fecha", "date", "fec"];
+const AMOUNT_KW = ["importe", "monto", "credito", "crédito", "debito", "débito", "amount", "haber", "debe"];
+
+function findHeaderRow(rows: unknown[][]): number {
+  for (let i = 0; i < Math.min(rows.length, 25); i++) {
+    const lower = rows[i].map((c) => String(c ?? "").toLowerCase().trim());
+    const hasDate   = lower.some((h) => DATE_KW.some((k) => h.includes(k)));
+    const hasAmount = lower.some((h) => AMOUNT_KW.some((k) => h.includes(k)));
+    if (hasDate && hasAmount) return i;
+  }
+  return 0;
+}
+
+// ─── Row processor ────────────────────────────────────────────────────────────
+
+function processRows(rows: unknown[][], headerRowIndex: number): ParseResult {
+  const mapping = guessColumns(rows[headerRowIndex]);
+  const transactions: ParsedTransaction[] = [];
+  const warnings: string[] = [];
+  let dataRowCount = 0;
+
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.every((c) => c === null || c === undefined || c === "")) continue;
+
+    const date = parseDate(row[mapping.dateCol]);
+    if (!date) continue; // silently skip metadata/footer/total rows
+
+    dataRowCount++;
+
+    const description = String(row[mapping.descCol] ?? "").trim() || "Sin descripción";
+
+    let reference: string | undefined;
+    if (mapping.referenceCol !== undefined) {
+      const ref = String(row[mapping.referenceCol] ?? "").trim();
+      if (ref && ref !== "0") reference = ref;
+    }
+
+    let amount: number | null = null;
+    let type: "income" | "expense" = "expense";
+
+    if (mapping.creditCol !== undefined && mapping.debitCol !== undefined) {
+      // Split columns: Crédito / Débito (e.g. Banco Nación)
+      // Debit values are stored as negative numbers — use Math.abs
+      const credit = parseAmount(row[mapping.creditCol]);
+      const debit  = parseAmount(row[mapping.debitCol]);
+      if (credit !== null && credit !== 0) {
+        amount = Math.abs(credit);
+        type = "income";
+      } else if (debit !== null && debit !== 0) {
+        amount = Math.abs(debit);
+        type = "expense";
+      }
+    } else {
+      const raw = parseAmount(row[mapping.amountCol]);
+      if (raw !== null) {
+        amount = Math.abs(raw);
+        if (mapping.operationCol !== undefined) {
+          // Superfondos: derive type from "Operación" column
+          const op = String(row[mapping.operationCol] ?? "").toLowerCase();
+          if (op.includes("rescate") || op.includes("retiro") || op.includes("cobro")) {
+            type = "income";   // fund redemption = money back to account
+          } else if (op.includes("invers") || op.includes("suscri") || op.includes("compra")) {
+            type = "expense";  // fund investment = money out of account
+          } else {
+            type = raw >= 0 ? "income" : "expense";
+          }
+        } else {
+          type = raw >= 0 ? "income" : "expense";
+        }
+      }
+    }
+
+    if (amount === null || amount === 0) {
+      warnings.push(`Fila ${i + 1}: monto no reconocido`);
+      continue;
+    }
+
+    transactions.push({ date, description, amount, type, reference });
+  }
+
+  return { transactions, warnings, totalRows: dataRowCount };
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function parseCSV(file: File): Promise<ParseResult> {
   return new Promise((resolve) => {
@@ -92,59 +244,13 @@ export async function parseCSV(file: File): Promise<ParseResult> {
       skipEmptyLines: true,
       encoding: "UTF-8",
       complete: (results) => {
-        const rows = results.data as string[][];
+        const rows = results.data as unknown[][];
         if (rows.length < 2) {
           resolve({ transactions: [], warnings: ["Archivo vacío o sin datos"], totalRows: 0 });
           return;
         }
-
-        const headers = rows[0];
-        const mapping = guessColumnMapping(headers);
-        const transactions: ParsedTransaction[] = [];
-        const warnings: string[] = [];
-
-        for (let i = 1; i < rows.length; i++) {
-          const row = rows[i];
-          const rawDate = row[mapping.dateCol] ?? "";
-          const date = detectDateFormat(rawDate.trim());
-
-          if (!date) {
-            warnings.push(`Fila ${i + 1}: fecha no reconocida ("${rawDate}")`);
-            continue;
-          }
-
-          const description = row[mapping.descCol]?.trim() || "Sin descripción";
-
-          let amount: number | null = null;
-          let type: "income" | "expense" = "expense";
-
-          if (mapping.creditCol !== undefined && mapping.debitCol !== undefined) {
-            const credit = parseAmount(row[mapping.creditCol] ?? "");
-            const debit = parseAmount(row[mapping.debitCol] ?? "");
-            if (credit && credit > 0) {
-              amount = credit;
-              type = "income";
-            } else if (debit && debit > 0) {
-              amount = debit;
-              type = "expense";
-            }
-          } else {
-            const raw = parseAmount(row[mapping.amountCol] ?? "");
-            if (raw !== null) {
-              amount = Math.abs(raw);
-              type = raw >= 0 ? "income" : "expense";
-            }
-          }
-
-          if (amount === null || amount === 0) {
-            warnings.push(`Fila ${i + 1}: monto no reconocido`);
-            continue;
-          }
-
-          transactions.push({ date, description, amount, type });
-        }
-
-        resolve({ transactions, warnings, totalRows: rows.length - 1 });
+        const headerRow = findHeaderRow(rows);
+        resolve(processRows(rows, headerRow));
       },
       error: (err) => {
         resolve({
@@ -164,12 +270,14 @@ export async function parseExcel(file: File): Promise<ParseResult> {
       try {
         const data = e.target?.result;
         const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const rows: string[][] = XLSX.utils.sheet_to_json(worksheet, {
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+
+        // raw: true preserves actual cell values (numbers as numbers, not reformatted strings)
+        // This avoids XLSX misformatting amounts like -54733 → "(547,33)"
+        const rows: unknown[][] = XLSX.utils.sheet_to_json(worksheet, {
           header: 1,
-          raw: false,
-          dateNF: "YYYY-MM-DD",
+          raw: true,
+          defval: "",
         });
 
         if (rows.length < 2) {
@@ -177,53 +285,13 @@ export async function parseExcel(file: File): Promise<ParseResult> {
           return;
         }
 
-        const headers = rows[0];
-        const mapping = guessColumnMapping(headers);
-        const transactions: ParsedTransaction[] = [];
-        const warnings: string[] = [];
-
-        for (let i = 1; i < rows.length; i++) {
-          const row = rows[i];
-          const rawDate = row[mapping.dateCol] ?? "";
-          const date = detectDateFormat(rawDate.toString().trim());
-
-          if (!date) {
-            warnings.push(`Fila ${i + 1}: fecha no reconocida ("${rawDate}")`);
-            continue;
-          }
-
-          const description = row[mapping.descCol]?.toString().trim() || "Sin descripción";
-          let amount: number | null = null;
-          let type: "income" | "expense" = "expense";
-
-          if (mapping.creditCol !== undefined && mapping.debitCol !== undefined) {
-            const credit = parseAmount(row[mapping.creditCol]?.toString() ?? "");
-            const debit = parseAmount(row[mapping.debitCol]?.toString() ?? "");
-            if (credit && credit > 0) {
-              amount = credit;
-              type = "income";
-            } else if (debit && debit > 0) {
-              amount = debit;
-              type = "expense";
-            }
-          } else {
-            const raw = parseAmount(row[mapping.amountCol]?.toString() ?? "");
-            if (raw !== null) {
-              amount = Math.abs(raw);
-              type = raw >= 0 ? "income" : "expense";
-            }
-          }
-
-          if (amount === null || amount === 0) continue;
-
-          transactions.push({ date, description, amount, type });
-        }
-
-        resolve({ transactions, warnings, totalRows: rows.length - 1 });
-      } catch (err: any) {
+        const headerRow = findHeaderRow(rows);
+        resolve(processRows(rows, headerRow));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         resolve({
           transactions: [],
-          warnings: [`Error al parsear Excel: ${err.message}`],
+          warnings: [`Error al parsear Excel: ${msg}`],
           totalRows: 0,
         });
       }
