@@ -19,6 +19,7 @@ export interface ParseResult {
 
 function parseAmount(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "string" && /^#+$/.test(value.trim())) return null; // Excel display overflow
   if (typeof value === "number") return isNaN(value) ? null : value;
 
   const s = String(value).replace(/[$\s]/g, "").trim();
@@ -55,6 +56,7 @@ function excelSerialToDate(serial: number): string | null {
 
 function parseDate(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "string" && /^#+$/.test(value.trim())) return null; // Excel display overflow
 
   // Numeric → Excel serial date
   if (typeof value === "number") return excelSerialToDate(value);
