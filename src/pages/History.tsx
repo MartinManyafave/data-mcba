@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   Search, ArrowUpRight, ArrowDownRight, Trash2, Loader2,
   ChevronLeft, ChevronRight, RefreshCw, FileText, SlidersHorizontal, X,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -48,6 +49,21 @@ export default function History() {
   const [amountOp, setAmountOp] = useState<AmountOp>("");
   const [amountVal, setAmountVal] = useState("");
   const [amountVal2, setAmountVal2] = useState("");
+
+  // Sort
+  type SortCol = "date" | "description" | "amount";
+  const [sortCol, setSortCol] = useState<SortCol>("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const handleSort = (col: SortCol) => {
+    if (col === sortCol) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortCol(col);
+      setSortDir(col === "description" ? "asc" : "desc");
+    }
+    setPage(0);
+  };
 
   const [summaryIncome, setSummaryIncome] = useState(0);
   const [summaryExpense, setSummaryExpense] = useState(0);
@@ -110,12 +126,13 @@ export default function History() {
         return q;
       };
 
+      const asc = sortDir === "asc";
       const pageQuery = addFilters(
         supabase
           .from("transactions")
           .select("*", { count: "exact" })
           .eq("user_id", user.id)
-          .order("date", { ascending: false })
+          .order(sortCol, { ascending: asc })
           .order("created_at", { ascending: false })
           .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
       );
@@ -144,7 +161,7 @@ export default function History() {
     } finally {
       setLoading(false);
     }
-  }, [user, page, typeFilter, categoryFilter, dateFrom, dateTo, amountOp, amountVal, amountVal2, search]);
+  }, [user, page, typeFilter, categoryFilter, dateFrom, dateTo, amountOp, amountVal, amountVal2, search, sortCol, sortDir]);
 
   useEffect(() => {
     const t = setTimeout(load, search ? 400 : 0);
@@ -468,11 +485,39 @@ export default function History() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Descripción</TableHead>
+                  {(["date", "description"] as const).map((col) => {
+                    const labels = { date: "Fecha", description: "Descripción" };
+                    const active = sortCol === col;
+                    const Icon = active ? (sortDir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+                    return (
+                      <TableHead
+                        key={col}
+                        className="cursor-pointer select-none whitespace-nowrap"
+                        onClick={() => handleSort(col)}
+                      >
+                        <span className={`inline-flex items-center gap-1 transition-colors ${active ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                          {labels[col]}
+                          <Icon className={`w-3.5 h-3.5 ${active ? "text-primary" : "opacity-40"}`} />
+                        </span>
+                      </TableHead>
+                    );
+                  })}
                   <TableHead className="hidden md:table-cell">Categoría</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead className="text-right">Monto</TableHead>
+                  <TableHead
+                    className="text-right cursor-pointer select-none whitespace-nowrap"
+                    onClick={() => handleSort("amount")}
+                  >
+                    <span className={`inline-flex items-center justify-end gap-1 transition-colors ${sortCol === "amount" ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortCol === "amount" ? "hidden" : "opacity-40"}`} />
+                      {sortCol === "amount" && (
+                        sortDir === "asc"
+                          ? <ArrowUp className="w-3.5 h-3.5 text-primary" />
+                          : <ArrowDown className="w-3.5 h-3.5 text-primary" />
+                      )}
+                      Monto
+                    </span>
+                  </TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
