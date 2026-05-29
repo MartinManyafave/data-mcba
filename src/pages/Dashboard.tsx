@@ -132,6 +132,30 @@ export default function Dashboard() {
 
   useEffect(() => { loadData(period); }, [user, location.key, period]);
 
+  // One-time fix: convert any negative-amount rows (legacy uploads) to positive
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data } = await supabase
+        .from("transactions")
+        .select("id, amount")
+        .eq("user_id", user.id)
+        .lt("amount", 0);
+      if (!data || data.length === 0) return;
+      await Promise.all(
+        data.map((tx) =>
+          supabase
+            .from("transactions")
+            .update({ amount: Math.abs(tx.amount) })
+            .eq("id", tx.id)
+            .eq("user_id", user.id)
+        )
+      );
+      toast.success(`${data.length} montos negativos corregidos`);
+      loadData(period);
+    })();
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const net = totalIncome - totalExpense;
 
   const stats = [
