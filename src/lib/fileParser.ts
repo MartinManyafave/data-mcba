@@ -19,7 +19,7 @@ export interface ParseResult {
 
 // ─── Amount parsing ───────────────────────────────────────────────────────────
 
-function parseAmount(value: unknown): number | null {
+export function parseAmount(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "string" && /^#+$/.test(value.trim())) return null; // Excel display overflow
   if (typeof value === "number") return isNaN(value) ? null : value;

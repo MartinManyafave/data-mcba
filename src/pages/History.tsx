@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { formatCurrency, formatDate, getCategoryLabel } from "@/lib/utils";
 import { SELECTABLE_CATEGORIES } from "@/lib/categoryDetector";
+import { parseAmount } from "@/lib/fileParser";
 import type { Transaction } from "@/integrations/supabase/types";
 import { toast } from "sonner";
 
@@ -57,8 +58,8 @@ export default function History() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  const amountFilterVal = amountOp && amountVal ? parseFloat(amountVal) : NaN;
-  const amountFilterActive = amountOp !== "" && !isNaN(amountFilterVal) && amountFilterVal > 0;
+  const amountFilterVal = amountOp && amountVal ? (parseAmount(amountVal) ?? NaN) : NaN;
+  const amountFilterActive = amountOp !== "" && !isNaN(amountFilterVal);
 
   const activeFilterCount = [
     typeFilter !== "all",
@@ -93,15 +94,15 @@ export default function History() {
         if (dateTo) q = q.lte("date", dateTo);
         if (search) q = q.ilike("description", `%${search}%`);
         if (amountOp && amountVal !== "") {
-          const val = parseFloat(amountVal);
-          if (!isNaN(val)) {
+          const val = parseAmount(amountVal);
+          if (val !== null) {
             if (amountOp === "gt")  q = q.gt("amount", val);
             if (amountOp === "lt")  q = q.lt("amount", val);
             if (amountOp === "gte") q = q.gte("amount", val);
             if (amountOp === "lte") q = q.lte("amount", val);
             if (amountOp === "between" && amountVal2 !== "") {
-              const val2 = parseFloat(amountVal2);
-              if (!isNaN(val2))
+              const val2 = parseAmount(amountVal2);
+              if (val2 !== null)
                 q = q.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
             }
           }
@@ -184,15 +185,15 @@ export default function History() {
         if (dateTo) idsQuery = idsQuery.lte("date", dateTo);
         if (search) idsQuery = idsQuery.ilike("description", `%${search}%`);
         if (amountOp && amountVal !== "") {
-          const val = parseFloat(amountVal);
-          if (!isNaN(val)) {
+          const val = parseAmount(amountVal);
+          if (val !== null) {
             if (amountOp === "gt")  idsQuery = idsQuery.gt("amount", val);
             if (amountOp === "lt")  idsQuery = idsQuery.lt("amount", val);
             if (amountOp === "gte") idsQuery = idsQuery.gte("amount", val);
             if (amountOp === "lte") idsQuery = idsQuery.lte("amount", val);
             if (amountOp === "between" && amountVal2 !== "") {
-              const val2 = parseFloat(amountVal2);
-              if (!isNaN(val2))
+              const val2 = parseAmount(amountVal2);
+              if (val2 !== null)
                 idsQuery = idsQuery.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
             }
           }
@@ -357,15 +358,17 @@ export default function History() {
                 {amountOp === "between" ? (
                   <div className="flex gap-1.5">
                     <Input
-                      type="number"
-                      placeholder="Mín"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="ej: 10.000"
                       className="h-9 text-sm"
                       value={amountVal}
                       onChange={(e) => { setAmountVal(e.target.value); setPage(0); }}
                     />
                     <Input
-                      type="number"
-                      placeholder="Máx"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="ej: 50.000"
                       className="h-9 text-sm"
                       value={amountVal2}
                       onChange={(e) => { setAmountVal2(e.target.value); setPage(0); }}
@@ -373,8 +376,9 @@ export default function History() {
                   </div>
                 ) : (
                   <Input
-                    type="number"
-                    placeholder="Ingresá un monto"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="ej: 120.000"
                     className="h-9 text-sm"
                     value={amountVal}
                     onChange={(e) => { setAmountVal(e.target.value); setPage(0); }}
@@ -420,7 +424,7 @@ export default function History() {
           )}
           {amountFilterActive && (
             <Badge variant="outline" className="text-xs gap-1 cursor-pointer" onClick={() => { setAmountOp(""); setAmountVal(""); setAmountVal2(""); }}>
-              Monto {amountOpLabel} {amountOp === "between" && amountVal2 ? `${formatCurrency(parseFloat(amountVal))} – ${formatCurrency(parseFloat(amountVal2))}` : formatCurrency(parseFloat(amountVal))} <X className="w-3 h-3" />
+              Monto {amountOpLabel} {amountOp === "between" && amountVal2 ? `${formatCurrency(amountFilterVal)} – ${formatCurrency(parseAmount(amountVal2) ?? 0)}` : formatCurrency(amountFilterVal)} <X className="w-3 h-3" />
             </Badge>
           )}
           <button onClick={clearFilters} className="text-xs text-muted-foreground hover:text-foreground underline">
