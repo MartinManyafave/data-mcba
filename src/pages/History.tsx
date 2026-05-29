@@ -509,7 +509,7 @@ export default function History() {
                       </Badge>
                     </TableCell>
                     <TableCell className={`text-right font-semibold text-sm ${tx.type === "income" ? "text-success" : "text-destructive"}`}>
-                      {tx.type === "income" ? "+" : "-"}{formatCurrency(Math.abs(tx.amount))}
+                      {formatCurrency(Math.abs(tx.amount))}
                     </TableCell>
                     <TableCell>
                       <Button
