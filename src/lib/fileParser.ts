@@ -216,37 +216,40 @@ function processRows(rows: unknown[][], headerRowIndex: number): ParseResult {
 
     if (mapping.creditCol !== undefined && mapping.debitCol !== undefined) {
       // Split columns: Crédito / Débito (e.g. Banco Nación)
-      // Debit values are stored as negative numbers — use Math.abs
       const credit = parseAmount(row[mapping.creditCol]);
       const debit  = parseAmount(row[mapping.debitCol]);
       if (credit !== null && credit !== 0) {
-        amount = Math.abs(credit);
+        amount = Math.abs(credit);    // income: positive
         type = "income";
       } else if (debit !== null && debit !== 0) {
-        amount = Math.abs(debit);
+        amount = -Math.abs(debit);    // expense: negative
         type = "expense";
       }
     } else {
       const raw = parseAmount(row[mapping.amountCol]);
       if (raw !== null) {
-        amount = Math.abs(raw);
         if (mapping.operationCol !== undefined) {
           // Superfondos: derive type from "Operación" column
           const op = String(row[mapping.operationCol] ?? "").toLowerCase();
           if (op.includes("rescate") || op.includes("retiro") || op.includes("cobro")) {
-            type = "income";   // fund redemption = money back to account
+            amount = Math.abs(raw);   // income: positive
+            type = "income";
           } else if (op.includes("invers") || op.includes("suscri") || op.includes("compra")) {
-            type = "expense";  // fund investment = money out of account
+            amount = -Math.abs(raw);  // expense: negative
+            type = "expense";
           } else {
+            amount = raw;
             type = raw >= 0 ? "income" : "expense";
           }
         } else {
+          // Sign of the raw value determines type
+          amount = raw;
           type = raw >= 0 ? "income" : "expense";
         }
       }
     }
 
-    if (amount === null || amount === 0) {
+    if (amount === null || amount === 0 || isNaN(amount)) {
       warnings.push(`Fila ${i + 1}: monto no reconocido`);
       continue;
     }

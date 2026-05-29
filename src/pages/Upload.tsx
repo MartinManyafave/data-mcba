@@ -151,8 +151,8 @@ export default function Upload() {
   };
 
   const totalTx = entries.reduce((s, e) => s + e.transactions.length, 0);
-  const totalIncome = entries.flatMap((e) => e.transactions).filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const totalExpense = entries.flatMap((e) => e.transactions).filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const totalIncome = entries.flatMap((e) => e.transactions).filter((t) => t.type === "income").reduce((s, t) => s + Math.abs(t.amount), 0);
+  const totalExpense = entries.flatMap((e) => e.transactions).filter((t) => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
 
   return (
     <div className="space-y-6 animate-fade-in max-w-4xl">
@@ -316,7 +316,7 @@ export default function Upload() {
                                       {tx.type === "income"
                                         ? <ArrowUpRight className="w-3 h-3" />
                                         : <ArrowDownRight className="w-3 h-3" />}
-                                      {formatCurrency(tx.amount)}
+                                      {formatCurrency(Math.abs(tx.amount))}
                                     </span>
                                   </TableCell>
                                 </TableRow>

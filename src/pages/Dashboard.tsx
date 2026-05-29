@@ -108,15 +108,15 @@ export default function Dashboard() {
       }
       (chartTxs ?? []).forEach((tx) => {
         if (statsMap[tx.date]) {
-          if (tx.type === "income") statsMap[tx.date].income += tx.amount;
-          else statsMap[tx.date].expense += tx.amount;
+          if (tx.type === "income") statsMap[tx.date].income += Math.abs(tx.amount);
+          else statsMap[tx.date].expense += Math.abs(tx.amount);
         }
       });
       const allDays = Object.values(statsMap);
       const sampled = allDays.filter((_, i) => i % 4 === 0 || i === allDays.length - 1);
 
-      const inc = (allPeriodTxs ?? []).filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-      const exp = (allPeriodTxs ?? []).filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+      const inc = (allPeriodTxs ?? []).filter((t) => t.type === "income").reduce((s, t) => s + Math.abs(t.amount), 0);
+      const exp = (allPeriodTxs ?? []).filter((t) => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
 
       setRecentTxs(txs ?? []);
       setChartData(sampled);
@@ -132,26 +132,28 @@ export default function Dashboard() {
 
   useEffect(() => { loadData(period); }, [user, location.key, period]);
 
-  // One-time fix: convert any negative-amount rows (legacy uploads) to positive
+  // One-time fix: expenses must be stored as negative, incomes as positive
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data } = await supabase
+      // Find expenses incorrectly stored as positive (all legacy data)
+      const { data: positiveExpenses } = await supabase
         .from("transactions")
         .select("id, amount")
         .eq("user_id", user.id)
-        .lt("amount", 0);
-      if (!data || data.length === 0) return;
+        .eq("type", "expense")
+        .gt("amount", 0);
+      if (!positiveExpenses || positiveExpenses.length === 0) return;
       await Promise.all(
-        data.map((tx) =>
+        positiveExpenses.map((tx) =>
           supabase
             .from("transactions")
-            .update({ amount: Math.abs(tx.amount) })
+            .update({ amount: -tx.amount })
             .eq("id", tx.id)
             .eq("user_id", user.id)
         )
       );
-      toast.success(`${data.length} montos negativos corregidos`);
+      toast.success(`${positiveExpenses.length} egresos convertidos a negativos`);
       loadData(period);
     })();
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -368,7 +370,7 @@ export default function Dashboard() {
                       }`}
                     >
                       {tx.type === "income" ? "+" : "-"}
-                      {formatCurrency(tx.amount)}
+                      {formatCurrency(Math.abs(tx.amount))}
                     </span>
                   </div>
                 ))}
