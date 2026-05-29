@@ -94,16 +94,21 @@ export default function History() {
         if (dateTo) q = q.lte("date", dateTo);
         if (search) q = q.ilike("description", `%${search}%`);
         if (amountOp && amountVal !== "") {
-          const val = parseAmount(amountVal);
-          if (val !== null) {
-            if (amountOp === "gt")  q = q.gt("amount", val);
-            if (amountOp === "lt")  q = q.lt("amount", val);
-            if (amountOp === "gte") q = q.gte("amount", val);
-            if (amountOp === "lte") q = q.lte("amount", val);
+          const raw = parseAmount(amountVal);
+          if (raw !== null) {
+            const v = Math.abs(raw);
+            // Compare by absolute value to handle both positive and negative stored amounts
+            if (amountOp === "gt")  q = q.or(`amount.gt.${v},amount.lt.${-v}`);
+            if (amountOp === "gte") q = q.or(`amount.gte.${v},amount.lte.${-v}`);
+            if (amountOp === "lt" && v > 0)  q = q.gt("amount", -v).lt("amount", v);
+            if (amountOp === "lte") q = q.gte("amount", -v).lte("amount", v);
             if (amountOp === "between" && amountVal2 !== "") {
-              const val2 = parseAmount(amountVal2);
-              if (val2 !== null)
-                q = q.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
+              const raw2 = parseAmount(amountVal2);
+              if (raw2 !== null) {
+                const min = Math.min(v, Math.abs(raw2));
+                const max = Math.max(v, Math.abs(raw2));
+                q = q.or(`and(amount.gte.${min},amount.lte.${max}),and(amount.gte.${-max},amount.lte.${-min})`);
+              }
             }
           }
         }
@@ -137,8 +142,8 @@ export default function History() {
       setTotal(count ?? 0);
 
       const all = allData ?? [];
-      setSummaryIncome(all.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0));
-      setSummaryExpense(all.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0));
+      setSummaryIncome(all.filter((t) => t.type === "income").reduce((s, t) => s + Math.abs(t.amount), 0));
+      setSummaryExpense(all.filter((t) => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0));
     } catch {
       toast.error("Error al cargar el historial");
     } finally {
@@ -185,16 +190,20 @@ export default function History() {
         if (dateTo) idsQuery = idsQuery.lte("date", dateTo);
         if (search) idsQuery = idsQuery.ilike("description", `%${search}%`);
         if (amountOp && amountVal !== "") {
-          const val = parseAmount(amountVal);
-          if (val !== null) {
-            if (amountOp === "gt")  idsQuery = idsQuery.gt("amount", val);
-            if (amountOp === "lt")  idsQuery = idsQuery.lt("amount", val);
-            if (amountOp === "gte") idsQuery = idsQuery.gte("amount", val);
-            if (amountOp === "lte") idsQuery = idsQuery.lte("amount", val);
+          const raw = parseAmount(amountVal);
+          if (raw !== null) {
+            const v = Math.abs(raw);
+            if (amountOp === "gt")  idsQuery = idsQuery.or(`amount.gt.${v},amount.lt.${-v}`);
+            if (amountOp === "gte") idsQuery = idsQuery.or(`amount.gte.${v},amount.lte.${-v}`);
+            if (amountOp === "lt" && v > 0)  idsQuery = idsQuery.gt("amount", -v).lt("amount", v);
+            if (amountOp === "lte") idsQuery = idsQuery.gte("amount", -v).lte("amount", v);
             if (amountOp === "between" && amountVal2 !== "") {
-              const val2 = parseAmount(amountVal2);
-              if (val2 !== null)
-                idsQuery = idsQuery.gte("amount", Math.min(val, val2)).lte("amount", Math.max(val, val2));
+              const raw2 = parseAmount(amountVal2);
+              if (raw2 !== null) {
+                const min = Math.min(v, Math.abs(raw2));
+                const max = Math.max(v, Math.abs(raw2));
+                idsQuery = idsQuery.or(`and(amount.gte.${min},amount.lte.${max}),and(amount.gte.${-max},amount.lte.${-min})`);
+              }
             }
           }
         }
@@ -500,7 +509,7 @@ export default function History() {
                       </Badge>
                     </TableCell>
                     <TableCell className={`text-right font-semibold text-sm ${tx.type === "income" ? "text-success" : "text-destructive"}`}>
-                      {tx.type === "income" ? "+" : "-"}{formatCurrency(tx.amount)}
+                      {tx.type === "income" ? "+" : "-"}{formatCurrency(Math.abs(tx.amount))}
                     </TableCell>
                     <TableCell>
                       <Button
