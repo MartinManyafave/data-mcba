@@ -376,13 +376,9 @@ export async function parseFile(file: File): Promise<ParseResult> {
   };
 }
 
-// ─── PDF parser (pdfjs-dist) ──────────────────────────────────────────────────
+// ─── PDF parser (loaded from CDN at runtime to avoid Vite/Rollup bundling issues) ──
 
-import * as pdfjsLib from "pdfjs-dist";
-
-// Worker — use CDN URL to avoid Vite/Rollup worker bundling issues
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.6.205/pdf.worker.min.mjs";
+const PDFJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.6.205";
 
 interface PdfItem { str: string; x: number; y: number; }
 
@@ -396,42 +392,47 @@ function parseAmountToken(s: string): number | null {
 }
 
 export async function parsePDF(file: File): Promise<ParseResult> {
-  let arrayBuffer: ArrayBuffer;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let pdfjsLib: any;
   try {
-    arrayBuffer = await file.arrayBuffer();
+    // Dynamic CDN import — bypasses Rollup entirely, loaded fresh per session
+    pdfjsLib = await import(/* @vite-ignore */ `${PDFJS_CDN}/pdf.min.mjs`);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_CDN}/pdf.worker.min.mjs`;
   } catch {
-    return { transactions: [], warnings: ["No se pudo leer el PDF"], totalRows: 0 };
+    return { transactions: [], warnings: ["No se pudo cargar el lector de PDF (requiere conexión)"], totalRows: 0 };
   }
 
-  let pdfDoc: Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
-  try {
-    pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  } catch {
-    return { transactions: [], warnings: ["No se pudo parsear el PDF"], totalRows: 0 };
-  }
+  let arrayBuffer: ArrayBuffer;
+  try { arrayBuffer = await file.arrayBuffer(); }
+  catch { return { transactions: [], warnings: ["No se pudo leer el archivo PDF"], totalRows: 0 }; }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let pdfDoc: any;
+  try { pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise; }
+  catch { return { transactions: [], warnings: ["No se pudo parsear el PDF — verificá que no esté protegido con contraseña"], totalRows: 0 }; }
 
   const transactions: ParsedTransaction[] = [];
   const warnings: string[] = [];
 
   // Column boundaries auto-detected from header row; fallback values cover both banks
-  let debitCreditBound = 425; // x < this → debit column; x > this → credit column
-  let creditSaldoBound = 510; // x > this → saldo column (skip)
+  let debitCreditBound = 425; // x < this → debit; x > this → credit
+  let creditSaldoBound = 510; // x > this → saldo (skip)
   let headerFound = false;
 
   for (let p = 1; p <= pdfDoc.numPages; p++) {
     const page = await pdfDoc.getPage(p);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const content = await page.getTextContent() as any;
+    const content = await page.getTextContent();
 
-    // Collect text items with positions
     const items: PdfItem[] = [];
     for (const item of content.items) {
       const s = (item.str as string)?.trim();
       if (!s) continue;
-      items.push({ str: s, x: item.transform[4] as number, y: item.transform[5] as number });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const t = item as any;
+      items.push({ str: s, x: t.transform[4], y: t.transform[5] });
     }
 
-    // Group items into rows (same y ±3pt tolerance)
+    // Group into rows by Y (tolerance ±3pt), sort top→bottom then left→right
     const yGroups = new Map<number, PdfItem[]>();
     for (const item of items) {
       let matched = false;
@@ -440,21 +441,19 @@ export async function parsePDF(file: File): Promise<ParseResult> {
       }
       if (!matched) yGroups.set(item.y, [item]);
     }
-
-    // Sort rows top-to-bottom, items left-to-right within each row
     const rows = [...yGroups.entries()]
       .sort((a, b) => b[0] - a[0])
       .map(([, row]) => row.sort((a, b) => a.x - b.x));
 
-    // Detect column header row once per document
+    // Auto-detect column positions from header row (once per document)
     if (!headerFound) {
       for (const row of rows) {
-        const debitItem = row.find(r => /^(déb?ito|debito)$/i.test(r.str));
-        const creditItem = row.find(r => /^(créd?ito|credito)$/i.test(r.str));
-        if (debitItem && creditItem && creditItem.x > debitItem.x) {
-          debitCreditBound = (debitItem.x + creditItem.x) / 2;
-          const saldoItem = row.find(r => /^saldo$/i.test(r.str) && r.x > creditItem.x);
-          if (saldoItem) creditSaldoBound = (creditItem.x + saldoItem.x) / 2;
+        const deb = row.find(r => /^(déb?ito|debito)$/i.test(r.str));
+        const cred = row.find(r => /^(créd?ito|credito)$/i.test(r.str));
+        if (deb && cred && cred.x > deb.x) {
+          debitCreditBound = (deb.x + cred.x) / 2;
+          const sal = row.find(r => /^saldo$/i.test(r.str) && r.x > cred.x);
+          if (sal) creditSaldoBound = (cred.x + sal.x) / 2;
           headerFound = true;
           break;
         }
@@ -462,30 +461,21 @@ export async function parsePDF(file: File): Promise<ParseResult> {
     }
 
     for (const row of rows) {
-      // Must have a date token (DD/MM/YY or DD/MM/YYYY)
       const dateItem = row.find(r => /^\d{1,2}\/\d{2}\/\d{2,4}$/.test(r.str));
       if (!dateItem) continue;
-
       const date = parseDate(dateItem.str);
       if (!date) continue;
 
-      // Amounts in row, excluding saldo column
-      const amtItems = row.filter(r =>
-        isAmountToken(r.str) && r.x <= creditSaldoBound
-      );
+      const amtItems = row.filter(r => isAmountToken(r.str) && r.x <= creditSaldoBound);
       if (amtItems.length === 0) continue;
 
-      // Description: items between date and first amount, skip voucher numbers
       const firstAmtX = Math.min(...amtItems.map(r => r.x));
       const desc = row
         .filter(r => r.x > dateItem.x + 2 && r.x < firstAmtX - 2 && !isAmountToken(r.str) && !/^\d{4,8}$/.test(r.str))
-        .map(r => r.str)
-        .join(" ")
-        .trim();
+        .map(r => r.str).join(" ").trim();
 
       if (!desc || /saldo|inicial|anterior|viene de|continua/i.test(desc)) continue;
 
-      // Take the first non-saldo amount and classify
       const amtItem = amtItems[0];
       const raw = parseAmountToken(amtItem.str);
       if (raw === null || raw === 0) continue;
@@ -495,8 +485,7 @@ export async function parsePDF(file: File): Promise<ParseResult> {
       const type: "income" | "expense" = isCredit ? "income" : "expense";
       const amount = type === "income" ? absAmt : -absAmt;
 
-      const category = detectCategory(desc, type);
-      transactions.push({ date, description: desc, amount, type, category });
+      transactions.push({ date, description: desc, amount, type, category: detectCategory(desc, type) });
     }
   }
 
