@@ -380,11 +380,9 @@ export async function parseFile(file: File): Promise<ParseResult> {
 
 import * as pdfjsLib from "pdfjs-dist";
 
-// Worker — Vite resolves the URL at build time
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).href;
+// Worker — use CDN URL to avoid Vite/Rollup worker bundling issues
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.6.205/pdf.worker.min.mjs";
 
 interface PdfItem { str: string; x: number; y: number; }
 
