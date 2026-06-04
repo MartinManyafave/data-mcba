@@ -378,7 +378,7 @@ export async function parseFile(file: File): Promise<ParseResult> {
 
 // ─── PDF parser (loaded from CDN at runtime to avoid Vite/Rollup bundling issues) ──
 
-const PDFJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.6.205";
+const PDFJS_CDN = "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build";
 
 interface PdfItem { str: string; x: number; y: number; }
 
@@ -398,6 +398,8 @@ export async function parsePDF(file: File): Promise<ParseResult> {
     // Dynamic CDN import — bypasses Rollup entirely, loaded fresh per session
     pdfjsLib = await import(/* @vite-ignore */ `${PDFJS_CDN}/pdf.min.mjs`);
     pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_CDN}/pdf.worker.min.mjs`;
+    // Warm-up: verify the lib loaded correctly
+    if (typeof pdfjsLib.getDocument !== "function") throw new Error("pdfjs API not available");
   } catch {
     return { transactions: [], warnings: ["No se pudo cargar el lector de PDF (requiere conexión)"], totalRows: 0 };
   }
