@@ -1,7 +1,8 @@
 export const CATEGORY_LABELS: Record<string, string> = {
   bank_tax:         "Impuesto Déb/Créd Bancario",
+  iva:              "IVA",
   taxes:            "Impuestos y Percepciones",
-  afip:             "AFIP",
+  afip:             "AFIP / ARCA",
   transfer_in:      "Transferencia recibida",
   transfer_out:     "Transferencia realizada",
   supplier_payment: "Pago a proveedores",
@@ -11,6 +12,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   credit_card:      "Tarjeta de crédito",
   checks:           "Cheques",
   utilities:        "Servicios públicos",
+  auto_debit:       "Débito Automático",
   bank_fees:        "Comisiones bancarias",
   debin:            "DEBIN",
   other:            "Otros",
@@ -24,8 +26,9 @@ export const CATEGORY_LABELS: Record<string, string> = {
 /** All selectable categories for filter dropdowns */
 export const SELECTABLE_CATEGORIES = [
   { value: "bank_tax",         label: "Impuesto Déb/Créd Bancario" },
+  { value: "iva",              label: "IVA" },
   { value: "taxes",            label: "Impuestos y Percepciones" },
-  { value: "afip",             label: "AFIP" },
+  { value: "afip",             label: "AFIP / ARCA" },
   { value: "transfer_in",      label: "Transferencia recibida" },
   { value: "transfer_out",     label: "Transferencia realizada" },
   { value: "supplier_payment", label: "Pago a proveedores" },
@@ -35,6 +38,7 @@ export const SELECTABLE_CATEGORIES = [
   { value: "credit_card",      label: "Tarjeta de crédito" },
   { value: "checks",           label: "Cheques" },
   { value: "utilities",        label: "Servicios públicos" },
+  { value: "auto_debit",       label: "Débito Automático" },
   { value: "bank_fees",        label: "Comisiones bancarias" },
   { value: "debin",            label: "DEBIN" },
   { value: "other",            label: "Otros" },
@@ -55,15 +59,18 @@ function norm(s: string): string {
 export function detectCategory(description: string, type: "income" | "expense"): string {
   const d = norm(description);
 
-  // ── AFIP ───────────────────────────────────────────────────────────────────
-  if (/\bafip\b|recaudaciones afip|pago afip/.test(d)) return "afip";
+  // ── AFIP / ARCA (same entity, renamed in 2024) ─────────────────────────────
+  if (/\bafip\b|\barca\b|recaudaciones afip|pago afip|obligaciones.*arca|pago.*arca/.test(d)) return "afip";
 
-  // ── Banco tax (impuesto al débito/crédito bancario - Ley 25.413) ───────────
+  // ── Banco tax (Impuesto al débito/crédito bancario - Ley 25.413) ───────────
   if (/impuesto ley|impuesto deb|impuesto cred/.test(d)) return "bank_tax";
 
-  // ── Taxes / percepciones ───────────────────────────────────────────────────
+  // ── IVA ────────────────────────────────────────────────────────────────────
+  if (/\biva\b|\bi\.v\.a\b|debito fiscal/.test(d)) return "iva";
+
+  // ── Taxes / percepciones (SIRCREB, IIBB, sellos, retenciones) ─────────────
   if (
-    /\biva\b|percepcion|ingresos brutos|iibb|impuesto de sellos|sircreb|rg 2408|reg.*recaudacion/.test(d)
+    /percepcion|ingresos brutos|iibb|impuesto de sellos|sircreb|rg 2408|reg.*recaudacion|arba/.test(d)
   ) return "taxes";
 
   // ── Salaries / payroll ─────────────────────────────────────────────────────
@@ -74,7 +81,7 @@ export function detectCategory(description: string, type: "income" | "expense"):
 
   // ── Investments / funds ────────────────────────────────────────────────────
   if (
-    /superfondo|fondo comun|fondo de inversion|suscripcion fondo|suscripcion fondos|rescate fondo|rescate|inversion|plazo fijo|deposito plazo/.test(d)
+    /superfondo|fondo comun|fondo de inversion|suscripcion fondo|rescate fondo|rescate|inversion|plazo fijo|deposito plazo/.test(d)
   ) return "investments";
 
   // ── Credit card payments ───────────────────────────────────────────────────
@@ -83,16 +90,19 @@ export function detectCategory(description: string, type: "income" | "expense"):
   // ── Checks ─────────────────────────────────────────────────────────────────
   if (/e.?cheq|echeq|deposito.*cheq|cfu depecheq|cheque/.test(d)) return "checks";
 
-  // ── Utilities / public services ────────────────────────────────────────────
+  // ── Utilities / named public services ─────────────────────────────────────
   if (
-    /edenor|metrogas|aysa|gcba.pvg|aguas|telecom|personal|claro|movistar|telefonica|luz|gas|agua|debito automatico/.test(d)
+    /edenor|metrogas|aysa|gcba.pvg|aguas|telecom|personal|claro|movistar|telefonica|telecentro|cablevision|fibertel|directv|luz|gas\b|agua\b/.test(d)
   ) return "utilities";
 
   if (/pago de servicios|pago servicio/.test(d)) return "utilities";
 
+  // ── Automatic debits (generic — when no named service matched above) ────────
+  if (/debito automatico|debito.*aut\b|deb\.?\s*autom/.test(d)) return "auto_debit";
+
   // ── Bank fees / commissions ────────────────────────────────────────────────
   if (
-    /comision|custodia|descubierto|interes.*descubierto|cobro.*interes|mantenimiento|cargo.*servicio/.test(d)
+    /comision|custodia|descubierto|interes.*descubierto|cobro.*interes|mantenimiento|cargo.*servicio|seg.*negocio|segurcoop|seguro/.test(d)
   ) return "bank_fees";
 
   // ── DEBIN ──────────────────────────────────────────────────────────────────

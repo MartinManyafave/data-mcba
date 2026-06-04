@@ -411,6 +411,15 @@ function extractCounterparty(text: string): string | null {
     return `${prep} ${titleCase(santMatch[2].trim())}`;
   }
 
+  // Credicoop service payments: "Ente: ARBA WEB"
+  const enteMatch = t.match(/^ente:\s*(.+)$/i);
+  if (enteMatch) return titleCase(enteMatch[1].trim());
+
+  // Débitos automáticos: "TELECENTRO−0008296685" or "SEGUR.SOCIO SEG.VIDA−1717005442116501"
+  // Name starts with a letter, ends with dash + reference number (6+ digits)
+  const serviceMatch = t.match(/^([A-Za-záéíóúñÁÉÍÓÚÑ][\w\s\.\,\/]*?)[−\-]\d{6,}\s*$/);
+  if (serviceMatch) return titleCase(serviceMatch[1].trim());
+
   return null;
 }
 
