@@ -485,8 +485,20 @@ export async function parsePDF(file: File): Promise<ParseResult> {
       }
     }
 
+    // Flag: stop parsing transactions once we hit a summary/detail section header
+    let inSummarySection = false;
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
+      const rowText = row.map(r => r.str).join(" ");
+
+      // Detect summary section headers (e.g. "TRANSFERENCIAS PESOS", "DEBITOS AUTOMATICOS",
+      // "DETALLE DE TRANSFERENCIAS", "CHEQUES PAGADOS") — these repeat transactions already seen
+      if (/transferencias\s+pesos|d[eé]bitos\s+autom[aá]ticos|cheques\s+pagados|detalle\s+de\s+(transferencias|d[eé]bitos|cheques)|totales\s+\d/i.test(rowText)) {
+        inSummarySection = true;
+      }
+      if (inSummarySection) continue;
+
       const dateItem = row.find(r => /^\d{1,2}\/\d{2}\/\d{2,4}$/.test(r.str));
       if (!dateItem) continue;
       const date = parseDate(dateItem.str);
