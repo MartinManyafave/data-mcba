@@ -395,32 +395,78 @@ function titleCase(s: string): string {
   return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
-// Extract counterparty name from a continuation row (line after the transaction date line)
+// Known-noise patterns for continuation rows — rows matching these are always skipped
+const CONTINUATION_NOISE = [
+  /^cbu\s*(origen|destino)/i,          // CBU numbers
+  /^\d{18,}$/,                          // raw CBU (22 digits)
+  /^(continua en|viene de)/i,           // page markers
+  /^(banco credicoop|banco santander|credicoop responde|calidad@|www\.)/i,
+  /^pagina \d/i,
+  /^pagado$/i,
+  /^\*+$/,                              // asterisk separators
+];
+
+/**
+ * Try to extract a clean counterparty/service name from a continuation row.
+ * Returns the name string on success, null if the row should be skipped.
+ */
 function extractCounterparty(text: string): string | null {
   const t = text.trim();
-  if (!t || /^[\d\s]+$/.test(t)) return null; // skip pure number rows
+  if (!t) return null;
+  if (/^[\d\s\-−\.\/]+$/.test(t)) return null;               // all numbers/separators
+  if (CONTINUATION_NOISE.some(p => p.test(t))) return null;  // known noise
 
-  // Credicoop: "20182723712−VAR−VICTOR HUGO,MARINELLA" (unicode minus U+2212 or ASCII -)
+  // ── Known patterns (highest confidence) ──────────────────────────────────
+
+  // Credicoop CUIT: "20182723712−VAR−VICTOR HUGO,MARINELLA"
   const creMatch = t.match(/^\d{10,11}[−\-](VAR|FAC|REC|PAG)[−\-](.+)$/i);
   if (creMatch) return titleCase(creMatch[2].replace(/,/g, " ").trim());
 
-  // Santander: "De raquel kwon / - var / 27253864953"  or  "A balanz capital valores / - inv / ..."
+  // Santander: "De raquel kwon / - var / ..." or "A balanz capital valores / ..."
   const santMatch = t.match(/^(de|a)\s+(.+?)\s*\/\s*[-−]/i);
   if (santMatch) {
     const prep = santMatch[1].charAt(0).toUpperCase() + santMatch[1].slice(1);
     return `${prep} ${titleCase(santMatch[2].trim())}`;
   }
 
-  // Credicoop service payments: "Ente: ARBA WEB"
+  // "Ente: ARBA WEB" — Credicoop service payments
   const enteMatch = t.match(/^ente:\s*(.+)$/i);
   if (enteMatch) return titleCase(enteMatch[1].trim());
 
-  // Débitos automáticos: "TELECENTRO−0008296685" or "SEGUR.SOCIO SEG.VIDA−1717005442116501"
-  // Name starts with a letter, ends with dash + reference number (6+ digits)
+  // "TELECENTRO−0008296685" — service name followed by dash + long reference number
   const serviceMatch = t.match(/^([A-Za-záéíóúñÁÉÍÓÚÑ][\w\s\.\,\/]*?)[−\-]\d{6,}\s*$/);
   if (serviceMatch) return titleCase(serviceMatch[1].trim());
 
+  // ── Generic fallback: any row with meaningful letters and no CBU-like content ─
+
+  // Skip rows that are mostly numbers/reference codes (e.g. lone CUIT without name)
+  if (/^\d{8,}/.test(t)) return null;
+
+  // If the row has real words (≥3 consecutive letters), use it as-is
+  if (/[A-Za-záéíóúñÁÉÍÓÚÑ]{3,}/.test(t) && t.length <= 80) {
+    // Strip any trailing reference number added after a dash
+    const cleaned = t.replace(/[−\-]\d{4,}\s*$/, "").trim();
+    return cleaned.length >= 3 ? titleCase(cleaned) : null;
+  }
+
   return null;
+}
+
+/**
+ * Look ahead from `startIdx` to collect continuation text for a transaction.
+ * Stops at the next date row or after `maxRows` rows.
+ * Returns a single combined supplement string (e.g. "Victor Hugo Marinella").
+ */
+function pickupContinuation(rows: PdfItem[][], startIdx: number, maxRows = 5): string {
+  for (let j = startIdx; j < Math.min(startIdx + maxRows, rows.length); j++) {
+    const row = rows[j];
+    // Stop when we hit the next transaction
+    if (row.some(r => /^\d{1,2}\/\d{2}\/\d{2,4}$/.test(r.str))) break;
+    const text = row.map(r => r.str).join(" ");
+    const result = extractCounterparty(text);
+    if (result) return result;
+  }
+  return "";
 }
 
 export async function parsePDF(file: File): Promise<ParseResult> {
@@ -532,16 +578,8 @@ export async function parsePDF(file: File): Promise<ParseResult> {
       const type: "income" | "expense" = isCredit ? "income" : "expense";
       const amount = type === "income" ? absAmt : -absAmt;
 
-      // Look ahead up to 3 continuation rows for counterparty name
-      let counterparty = "";
-      for (let j = i + 1; j < Math.min(i + 4, rows.length) && !counterparty; j++) {
-        const next = rows[j];
-        if (next.some(r => /^\d{1,2}\/\d{2}\/\d{2,4}$/.test(r.str))) break;
-        const cp = extractCounterparty(next.map(r => r.str).join(" "));
-        if (cp) counterparty = cp;
-      }
-
-      const fullDesc = counterparty ? `${desc} − ${counterparty}` : desc;
+      const supplement = pickupContinuation(rows, i + 1);
+      const fullDesc = supplement ? `${desc} − ${supplement}` : desc;
       transactions.push({ date, description: fullDesc, amount, type, category: detectCategory(fullDesc, type) });
     }
   }
