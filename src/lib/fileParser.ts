@@ -391,6 +391,29 @@ function parseAmountToken(s: string): number | null {
   return parseAmount(s.replace(/^\$\s*/, "").trim());
 }
 
+function titleCase(s: string): string {
+  return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Extract counterparty name from a continuation row (line after the transaction date line)
+function extractCounterparty(text: string): string | null {
+  const t = text.trim();
+  if (!t || /^[\d\s]+$/.test(t)) return null; // skip pure number rows
+
+  // Credicoop: "20182723712−VAR−VICTOR HUGO,MARINELLA" (unicode minus U+2212 or ASCII -)
+  const creMatch = t.match(/^\d{10,11}[−\-](VAR|FAC|REC|PAG)[−\-](.+)$/i);
+  if (creMatch) return titleCase(creMatch[2].replace(/,/g, " ").trim());
+
+  // Santander: "De raquel kwon / - var / 27253864953"  or  "A balanz capital valores / - inv / ..."
+  const santMatch = t.match(/^(de|a)\s+(.+?)\s*\/\s*[-−]/i);
+  if (santMatch) {
+    const prep = santMatch[1].charAt(0).toUpperCase() + santMatch[1].slice(1);
+    return `${prep} ${titleCase(santMatch[2].trim())}`;
+  }
+
+  return null;
+}
+
 export async function parsePDF(file: File): Promise<ParseResult> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let pdfjsLib: any;
@@ -462,7 +485,8 @@ export async function parsePDF(file: File): Promise<ParseResult> {
       }
     }
 
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       const dateItem = row.find(r => /^\d{1,2}\/\d{2}\/\d{2,4}$/.test(r.str));
       if (!dateItem) continue;
       const date = parseDate(dateItem.str);
@@ -487,7 +511,17 @@ export async function parsePDF(file: File): Promise<ParseResult> {
       const type: "income" | "expense" = isCredit ? "income" : "expense";
       const amount = type === "income" ? absAmt : -absAmt;
 
-      transactions.push({ date, description: desc, amount, type, category: detectCategory(desc, type) });
+      // Look ahead up to 3 continuation rows for counterparty name
+      let counterparty = "";
+      for (let j = i + 1; j < Math.min(i + 4, rows.length) && !counterparty; j++) {
+        const next = rows[j];
+        if (next.some(r => /^\d{1,2}\/\d{2}\/\d{2,4}$/.test(r.str))) break;
+        const cp = extractCounterparty(next.map(r => r.str).join(" "));
+        if (cp) counterparty = cp;
+      }
+
+      const fullDesc = counterparty ? `${desc} − ${counterparty}` : desc;
+      transactions.push({ date, description: fullDesc, amount, type, category: detectCategory(fullDesc, type) });
     }
   }
 
