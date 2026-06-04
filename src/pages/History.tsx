@@ -262,7 +262,19 @@ export default function History() {
         </div>
         <Button
           variant={filtersOpen ? "default" : "outline"}
-          onClick={() => setFiltersOpen((o) => !o)}
+          onClick={() => {
+            if (filtersOpen) {
+              setTypeFilter("all");
+              setCategoryFilter("all");
+              setDateFrom("");
+              setDateTo("");
+              setAmountOp("");
+              setAmountVal("");
+              setAmountVal2("");
+              setPage(0);
+            }
+            setFiltersOpen((o) => !o);
+          }}
           className="relative flex-shrink-0"
         >
           <SlidersHorizontal className="w-4 h-4 mr-2" />
