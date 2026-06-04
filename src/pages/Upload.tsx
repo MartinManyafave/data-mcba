@@ -75,6 +75,7 @@ export default function Upload() {
       "text/csv": [".csv"],
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
       "application/vnd.ms-excel": [".xls"],
+      "application/pdf": [".pdf"],
     },
     disabled: step === "parsing" || step === "saving",
   });
@@ -379,7 +380,7 @@ export default function Upload() {
                     <p className="font-medium mb-1">
                       {isDragActive ? "Soltá los archivos acá" : "Arrastrá o hacé clic para cargar"}
                     </p>
-                    <p className="text-sm text-muted-foreground">Podés subir varios archivos a la vez · CSV, XLSX o XLS</p>
+                    <p className="text-sm text-muted-foreground">Podés subir varios archivos a la vez · CSV, XLSX, XLS o PDF</p>
                   </div>
                 </div>
               )}

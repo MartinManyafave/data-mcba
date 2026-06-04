@@ -91,6 +91,14 @@ function parseDate(value: unknown): string | null {
     return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
 
+  // DD/MM/YY (2-digit year, used by Credicoop & Santander PDF statements)
+  const ar2 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/);
+  if (ar2) {
+    const [, d, m, y2] = ar2;
+    const year = parseInt(y2) >= 90 ? `19${y2}` : `20${y2}`;
+    return `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+
   // YYYY-MM-DD (ISO)
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
@@ -360,9 +368,139 @@ export async function parseFile(file: File): Promise<ParseResult> {
   const ext = file.name.split(".").pop()?.toLowerCase();
   if (ext === "csv") return parseCSV(file);
   if (ext === "xlsx" || ext === "xls") return parseExcel(file);
+  if (ext === "pdf") return parsePDF(file);
   return {
     transactions: [],
-    warnings: ["Formato no soportado. Use CSV o Excel (.xlsx/.xls)"],
+    warnings: ["Formato no soportado. Use CSV, Excel (.xlsx/.xls) o PDF"],
     totalRows: 0,
   };
+}
+
+// ─── PDF parser (pdfjs-dist) ──────────────────────────────────────────────────
+
+import * as pdfjsLib from "pdfjs-dist";
+
+// Worker — Vite resolves the URL at build time
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).href;
+
+interface PdfItem { str: string; x: number; y: number; }
+
+function isAmountToken(s: string): boolean {
+  const t = s.replace(/^\$\s*/, "").trim();
+  return /^\d{1,3}(\.\d{3})*,\d{2}$/.test(t) || /^\d{1,9},\d{2}$/.test(t);
+}
+
+function parseAmountToken(s: string): number | null {
+  return parseAmount(s.replace(/^\$\s*/, "").trim());
+}
+
+export async function parsePDF(file: File): Promise<ParseResult> {
+  let arrayBuffer: ArrayBuffer;
+  try {
+    arrayBuffer = await file.arrayBuffer();
+  } catch {
+    return { transactions: [], warnings: ["No se pudo leer el PDF"], totalRows: 0 };
+  }
+
+  let pdfDoc: Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
+  try {
+    pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  } catch {
+    return { transactions: [], warnings: ["No se pudo parsear el PDF"], totalRows: 0 };
+  }
+
+  const transactions: ParsedTransaction[] = [];
+  const warnings: string[] = [];
+
+  // Column boundaries auto-detected from header row; fallback values cover both banks
+  let debitCreditBound = 425; // x < this → debit column; x > this → credit column
+  let creditSaldoBound = 510; // x > this → saldo column (skip)
+  let headerFound = false;
+
+  for (let p = 1; p <= pdfDoc.numPages; p++) {
+    const page = await pdfDoc.getPage(p);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const content = await page.getTextContent() as any;
+
+    // Collect text items with positions
+    const items: PdfItem[] = [];
+    for (const item of content.items) {
+      const s = (item.str as string)?.trim();
+      if (!s) continue;
+      items.push({ str: s, x: item.transform[4] as number, y: item.transform[5] as number });
+    }
+
+    // Group items into rows (same y ±3pt tolerance)
+    const yGroups = new Map<number, PdfItem[]>();
+    for (const item of items) {
+      let matched = false;
+      for (const ky of yGroups.keys()) {
+        if (Math.abs(ky - item.y) <= 3) { yGroups.get(ky)!.push(item); matched = true; break; }
+      }
+      if (!matched) yGroups.set(item.y, [item]);
+    }
+
+    // Sort rows top-to-bottom, items left-to-right within each row
+    const rows = [...yGroups.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([, row]) => row.sort((a, b) => a.x - b.x));
+
+    // Detect column header row once per document
+    if (!headerFound) {
+      for (const row of rows) {
+        const debitItem = row.find(r => /^(déb?ito|debito)$/i.test(r.str));
+        const creditItem = row.find(r => /^(créd?ito|credito)$/i.test(r.str));
+        if (debitItem && creditItem && creditItem.x > debitItem.x) {
+          debitCreditBound = (debitItem.x + creditItem.x) / 2;
+          const saldoItem = row.find(r => /^saldo$/i.test(r.str) && r.x > creditItem.x);
+          if (saldoItem) creditSaldoBound = (creditItem.x + saldoItem.x) / 2;
+          headerFound = true;
+          break;
+        }
+      }
+    }
+
+    for (const row of rows) {
+      // Must have a date token (DD/MM/YY or DD/MM/YYYY)
+      const dateItem = row.find(r => /^\d{1,2}\/\d{2}\/\d{2,4}$/.test(r.str));
+      if (!dateItem) continue;
+
+      const date = parseDate(dateItem.str);
+      if (!date) continue;
+
+      // Amounts in row, excluding saldo column
+      const amtItems = row.filter(r =>
+        isAmountToken(r.str) && r.x <= creditSaldoBound
+      );
+      if (amtItems.length === 0) continue;
+
+      // Description: items between date and first amount, skip voucher numbers
+      const firstAmtX = Math.min(...amtItems.map(r => r.x));
+      const desc = row
+        .filter(r => r.x > dateItem.x + 2 && r.x < firstAmtX - 2 && !isAmountToken(r.str) && !/^\d{4,8}$/.test(r.str))
+        .map(r => r.str)
+        .join(" ")
+        .trim();
+
+      if (!desc || /saldo|inicial|anterior|viene de|continua/i.test(desc)) continue;
+
+      // Take the first non-saldo amount and classify
+      const amtItem = amtItems[0];
+      const raw = parseAmountToken(amtItem.str);
+      if (raw === null || raw === 0) continue;
+      const absAmt = Math.abs(raw);
+
+      const isCredit = amtItem.x > debitCreditBound;
+      const type: "income" | "expense" = isCredit ? "income" : "expense";
+      const amount = type === "income" ? absAmt : -absAmt;
+
+      const category = detectCategory(desc, type);
+      transactions.push({ date, description: desc, amount, type, category });
+    }
+  }
+
+  return { transactions, warnings, totalRows: transactions.length };
 }
