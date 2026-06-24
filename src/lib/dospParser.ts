@@ -1,4 +1,4 @@
-import { parseAmount, parseDate } from "./fileParser";
+import { parseDate } from "./fileParser";
 
 export interface DospEntry {
   date: string;
@@ -20,15 +20,15 @@ const INCOME_COMPS = new Set(["CBCC", "DEPB"]);
 const EXPENSE_COMPS = new Set(["OP", "EC", "EB"]);
 const KNOWN_COMPS = new Set([...INCOME_COMPS, ...EXPENSE_COMPS]);
 
-// Argentine amount token: 1,864,000.00 or 471,898.00
-function isAmtToken(s: string): boolean {
-  return /^\d{1,3}(\.\d{3})*,\d{2}$/.test(s) || /^\d{1,9},\d{2}$/.test(s);
+// DOSP prints amounts in US format: 1,864,000.00 (comma=thousands, dot=decimal)
+function parseDospAmount(s: string): number | null {
+  const v = parseFloat(s.replace(/,/g, ""));
+  return isNaN(v) ? null : v;
 }
 
 // Rows to skip (headers, footers, separators)
 const SKIP = [
-  /^HOJA\s+\d/i,
-  /^SUCU:/i,
+  /SUCU:/i,
   /FRUTIHORTICOLA/i,
   /LISTADO DE CUENTAS/i,
   /PERIODO DE ACREDITA/i,
@@ -36,7 +36,6 @@ const SKIP = [
   /^-{5,}/,
   /^={5,}/,
   /^CA\s+FECHAS/i,
-  /^JA\s+ACREDIT/i,
   /SALDO CTA/i,
   /DEL PERIODO ANTERIOR/i,
 ];
@@ -65,9 +64,6 @@ export async function parseDospPDF(file: File): Promise<DospParseResult> {
 
   const entries: DospEntry[] = [];
   const warnings: string[] = [];
-
-  const debugRows: string[] = [];
-  let debugCap = 30; // capture first 30 non-empty, non-skipped rows for diagnosis
 
   for (let p = 1; p <= pdfDoc.numPages; p++) {
     const page = await pdfDoc.getPage(p);
@@ -98,69 +94,39 @@ export async function parseDospPDF(file: File): Promise<DospParseResult> {
     for (const tokens of rows) {
       const rowText = tokens.join(" ");
 
-      // Skip headers/footers
       if (SKIP.some((re) => re.test(rowText))) continue;
 
-      // Capture raw rows for diagnosis
-      if (debugCap > 0) { debugRows.push(`[${tokens.map((t,i)=>`${i}:"${t}"`).join(", ")}]`); debugCap--; }
-
-      // Bank section headers like "1 - SANTANDER" — skip
-      if (/^\d+\s*-\s*[A-Z]+\s*$/.test(rowText.trim())) continue;
-
-      // Data rows start with "1" (CA column) then a DD/MM/YY date
-      if (tokens[0] !== "1") continue;
-      if (!/^\d{1,2}\/\d{2}\/\d{2,4}$/.test(tokens[1] ?? "")) continue;
-
-      const comprobante = tokens[3];
+      // Data rows: tokens[0] = "1 DD/MM/YY" (CA column + date merged by PDF renderer)
+      //            tokens[1] = "DD/MM/YY" (accrual date, same date)
+      //            tokens[2] = comprobante (CBCC | DEPB | OP | EC | EB)
+      //            tokens[3..n-3] = reference + description
+      //            tokens[n-2] = transaction amount (US format: 1,864,000.00)
+      //            tokens[n-1] = running saldo (ignored)
+      if (!/^1\s+\d{1,2}\/\d{2}\/\d{2,4}$/.test(tokens[0])) continue;
+      const comprobante = tokens[2];
       if (!KNOWN_COMPS.has(comprobante)) continue;
+      if (tokens.length < 5) continue;
 
       const date = parseDate(tokens[1]);
       if (!date) continue;
 
-      // Find the last two amount tokens (transaction_amount, running_saldo)
-      // Work backwards: collect up to 2 amount tokens
-      const amtValues: number[] = [];
-      let firstAmtIdx = tokens.length;
-      for (let i = tokens.length - 1; i >= 5 && amtValues.length < 2; i--) {
-        if (isAmtToken(tokens[i])) {
-          const v = parseAmount(tokens[i]);
-          if (v !== null) {
-            amtValues.unshift(v);
-            firstAmtIdx = i;
-          }
-        } else if (amtValues.length > 0) {
-          // Stop once we hit a non-amount after finding amounts
-          break;
-        }
-      }
-
-      if (amtValues.length === 0) {
-        warnings.push(`Fila sin monto reconocido: ${rowText.slice(0, 60)}`);
+      const txAmt = parseDospAmount(tokens[tokens.length - 2]);
+      if (txAmt === null || txAmt === 0) {
+        warnings.push(`Fila sin monto reconocido: ${rowText.slice(0, 80)}`);
         continue;
       }
 
-      // First of the collected amounts is the transaction amount (second-to-last in row)
-      const txAmt = amtValues[0];
-      if (txAmt === 0) continue;
-
-      // Description: tokens[5..firstAmtIdx-1], strip trailing dots
-      const reference = tokens[4] ?? "";
-      const descTokens = tokens.slice(5, firstAmtIdx);
-      const description = descTokens
-        .join(" ")
-        .replace(/\.{3,}/g, "")
-        .trim() || reference;
+      // Description: all tokens between comprobante and the two trailing amount tokens,
+      // stripping dot-sequences (............) used as column fillers
+      const descRaw = tokens.slice(3, tokens.length - 2).join(" ").replace(/\.{3,}/g, "").trim();
+      const reference = tokens[3]?.replace(/\.{3,}/g, "").trim() ?? "";
+      const description = descRaw || reference;
 
       const type: "income" | "expense" = INCOME_COMPS.has(comprobante) ? "income" : "expense";
       const amount = type === "income" ? Math.abs(txAmt) : -Math.abs(txAmt);
 
       entries.push({ date, comprobante, reference, description, amount, type });
     }
-  }
-
-  if (entries.length === 0 && debugRows.length > 0) {
-    warnings.push("DEBUG — primeras filas detectadas (tokens por posición):");
-    for (const r of debugRows) warnings.push(r);
   }
 
   return { entries, warnings };
