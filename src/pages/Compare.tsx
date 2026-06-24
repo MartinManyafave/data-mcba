@@ -71,9 +71,10 @@ export default function Compare() {
   });
 
   const result = useMemo<ReconcileResult | null>(() => {
-    if (!bank.transactions || !dosp.entries) return null;
+    if (!bank.transactions || bank.error || bank.transactions.length === 0) return null;
+    if (!dosp.entries || dosp.error || dosp.entries.length === 0) return null;
     return reconcile(bank.transactions, dosp.entries);
-  }, [bank.transactions, dosp.entries]);
+  }, [bank.transactions, bank.error, dosp.entries, dosp.error]);
 
   const diffIncome  = result ? result.totalBankIncome  - result.totalDospIncome  : 0;
   const diffExpense = result ? result.totalBankExpense - result.totalDospExpense : 0;
