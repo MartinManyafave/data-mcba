@@ -310,9 +310,14 @@ function SideCard({
                 </p>
               )}
               {state.warnings.length > 0 && (
-                <p className="text-xs text-warning">
-                  {state.warnings.length} advertencia{state.warnings.length > 1 ? "s" : ""}
-                </p>
+                <details className="mt-1">
+                  <summary className="text-xs text-warning cursor-pointer">
+                    {state.warnings.length} advertencia{state.warnings.length > 1 ? "s" : ""} (ver)
+                  </summary>
+                  <div className="mt-1 text-[10px] text-muted-foreground font-mono whitespace-pre-wrap max-h-40 overflow-auto">
+                    {state.warnings.join("\n")}
+                  </div>
+                </details>
               )}
             </div>
             <button

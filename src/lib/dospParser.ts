@@ -66,6 +66,9 @@ export async function parseDospPDF(file: File): Promise<DospParseResult> {
   const entries: DospEntry[] = [];
   const warnings: string[] = [];
 
+  const debugRows: string[] = [];
+  let debugCap = 30; // capture first 30 non-empty, non-skipped rows for diagnosis
+
   for (let p = 1; p <= pdfDoc.numPages; p++) {
     const page = await pdfDoc.getPage(p);
     const content = await page.getTextContent();
@@ -97,6 +100,9 @@ export async function parseDospPDF(file: File): Promise<DospParseResult> {
 
       // Skip headers/footers
       if (SKIP.some((re) => re.test(rowText))) continue;
+
+      // Capture raw rows for diagnosis
+      if (debugCap > 0) { debugRows.push(`[${tokens.map((t,i)=>`${i}:"${t}"`).join(", ")}]`); debugCap--; }
 
       // Bank section headers like "1 - SANTANDER" — skip
       if (/^\d+\s*-\s*[A-Z]+\s*$/.test(rowText.trim())) continue;
@@ -150,6 +156,11 @@ export async function parseDospPDF(file: File): Promise<DospParseResult> {
 
       entries.push({ date, comprobante, reference, description, amount, type });
     }
+  }
+
+  if (entries.length === 0 && debugRows.length > 0) {
+    warnings.push("DEBUG — primeras filas detectadas (tokens por posición):");
+    for (const r of debugRows) warnings.push(r);
   }
 
   return { entries, warnings };
