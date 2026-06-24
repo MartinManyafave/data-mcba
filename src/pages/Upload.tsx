@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency, formatDate, getCategoryLabel } from "@/lib/utils";
 import { toast } from "sonner";
+import CategorySummaryCard from "@/components/CategorySummaryCard";
 
 type UploadStep = "idle" | "parsing" | "preview" | "saving" | "done";
 
@@ -224,6 +225,11 @@ export default function Upload() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Category breakdown */}
+            <CategorySummaryCard
+              transactions={entries.flatMap((e) => e.transactions)}
+            />
 
             {/* Per-file cards */}
             <div className="space-y-3">
