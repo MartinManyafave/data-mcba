@@ -74,7 +74,7 @@ function excelSerialToDate(serial: number): string | null {
   return `${y}-${m}-${day}`;
 }
 
-function parseDate(value: unknown): string | null {
+export function parseDate(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "string" && /^#+$/.test(value.trim())) return null; // Excel display overflow
 
