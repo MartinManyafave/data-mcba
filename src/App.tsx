@@ -10,6 +10,7 @@ import Upload from "@/pages/Upload";
 import History from "@/pages/History";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
+import Compare from "@/pages/Compare";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -94,6 +95,16 @@ export default function App() {
                 <ProtectedRoute>
                   <Layout>
                     <Reports />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/compare"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Compare />
                   </Layout>
                 </ProtectedRoute>
               }

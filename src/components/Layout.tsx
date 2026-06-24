@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Upload, History, BarChart3, Settings,
-  LogOut, TrendingUp, ChevronRight, User,
+  LogOut, TrendingUp, ChevronRight, User, GitCompare,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -17,6 +17,7 @@ const navItems = [
   { to: "/upload", icon: Upload, label: "Cargar" },
   { to: "/history", icon: History, label: "Historial" },
   { to: "/reports", icon: BarChart3, label: "Reportes" },
+  { to: "/compare", icon: GitCompare, label: "Comparar" },
   { to: "/settings", icon: Settings, label: "Config" },
 ];
 
