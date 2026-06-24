@@ -259,7 +259,12 @@ export default function Compare() {
                           </td>
                         </tr>
                       ) : (
-                        displayPairs.map((pair, i) => <PairRow key={i} pair={pair} />)
+                        displayPairs.map((pair) => (
+                          <PairRow
+                            key={`${pair.status}|${pair.bank?.date ?? ""}|${pair.bank?.amount ?? ""}|${pair.dosp?.date ?? ""}|${pair.dosp?.amount ?? ""}`}
+                            pair={pair}
+                          />
+                        ))
                       )}
                     </tbody>
                   </table>
